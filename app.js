@@ -1,0 +1,506 @@
+// Special Strike Gacha: a client-only card game. Saves to localStorage; no server, no external data.
+(function () {
+  'use strict';
+  const G = window.SSG, TIERS = G.TIERS, CARDS = G.CARDS, BYID = G.BYID, DIFFS = G.DIFFS, CATS = G.CATS;
+  const SFX = (window.SFX && window.SFX.sfx) || new Proxy({}, { get: () => () => {} });
+  const unlockAudio = (window.SFX && window.SFX.unlockAudio) || function () {};
+  const configureAudio = (window.SFX && window.SFX.configureAudio) || function () {};
+
+  const $ = (s, r) => (r || document).querySelector(s);
+  const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const tcls = (t) => 't-' + t.toLowerCase();
+  const reduceMotion = () => S.settings.motion === false || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const fmt = (n) => Math.round(n).toLocaleString('en-US');
+  const pick = (a) => a[Math.floor(Math.random() * a.length)];
+
+  // ---------- save ----------
+  const KEY = 'ss-gacha-save-v1';
+  let backupDirty = false, allowLeave = false;
+  let memorySave = null; // used if localStorage is blocked
+  function fresh() {
+    return { v: 1, started: false, diff: 'sigma', packs: DIFFS.sigma.start, last: Date.now(), sinceRare: 0, cards: {},
+      stats: { opened: 0, pulls: 0 }, settings: { sound: true, volume: 0.6, motion: true, monster: false, leaveWarn: true } };
+  }
+  function load() {
+    let raw = null;
+    try { raw = localStorage.getItem(KEY); } catch (e) { raw = memorySave; }
+    if (raw) { try { const j = JSON.parse(raw); return Object.assign(fresh(), j, { diff: 'sigma',  stats: Object.assign(fresh().stats, j.stats), settings: Object.assign(fresh().settings, j.settings) }); } catch (e) { /* fall through */ } }
+    return fresh();
+  }
+  let S = load();
+  function save() { const j = JSON.stringify(S); try { localStorage.setItem(KEY, j); } catch (e) { memorySave = j; } backupDirty = true; }
+  const D = () => DIFFS.sigma;
+  const CARDS_PER_PACK = 5;
+
+  // ---------- packs ----------
+  function tick() {
+    const d = D(), now = Date.now(), iv = d.interval * 60000;
+    if (S.packs >= d.cap) { S.last = now; return; }
+    const n = Math.floor((now - S.last) / iv);
+    if (n > 0) { S.packs += Math.min(n, d.cap - S.packs); S.last += n * iv; if (S.packs >= d.cap) S.last = now; save(); }
+  }
+  function weights(d, forceRare) { return G.BASE_WEIGHTS.map((w, i) => (forceRare && i < 2 ? 0 : i >= 2 ? w * d.luck : w)); }
+  function pickIdx(w) { let t = w.reduce((a, b) => a + b, 0), r = Math.random() * t; for (let i = 0; i < w.length; i++) { r -= w[i]; if (r < 0) return i; } return w.length - 1; }
+  function rollCard(d, force) { const tier = G.BYTIER[pickIdx(weights(d, force))]; return pick(tier); }
+  function rollPack() {
+    const d = D(), out = [];
+    for (let i = 0; i < CARDS_PER_PACK; i++) out.push({ card: rollCard(d, false), holo: Math.random() < d.holo });
+    if (out.some((o) => o.card.ti >= 2)) S.sinceRare = 0;
+    else { S.sinceRare++; if (d.pity && S.sinceRare >= d.pity) { out[out.length - 1] = { card: rollCard(d, true), holo: Math.random() < d.holo, pity: true }; S.sinceRare = 0; } }
+    if (S.settings.monster && Math.random() < 0.25) out[Math.floor(Math.random() * out.length)].eaten = true;
+    out.forEach((o) => {
+      if (o.eaten) return;
+      const e = S.cards[o.card.id];
+      o.isNew = !e ? 'card' : (o.holo && !e.h ? 'holo' : '');
+      if (!e) S.cards[o.card.id] = { n: 1, h: o.holo ? 1 : 0, t: Date.now(), f: 0 };
+      else { e.n++; if (o.holo) e.h++; }
+    });
+    S.stats.opened++; S.stats.pulls += out.filter((o) => !o.eaten).length;
+    return out;
+  }
+  const owned = () => Object.keys(S.cards).filter((id) => BYID[id] && S.cards[id].n > 0);
+  const power = (c, holo) => Math.round((c.atk * 2 + c.hp + c.spd) * (holo ? 1.1 : 1));
+
+  // ---------- card art (all procedural, no image files) ----------
+  function art(c) {
+    const img = c.img ? `<img class="art-img" src="${c.img}" alt="" draggable="false" onerror="this.remove()">` : '';
+    const r = G.rng(G.hash(c.id)), hue = CATS[c.cat].hue, skin = (hue + Math.floor(r() * 50) - 25 + 360) % 360;
+    const sat = 26 + Math.floor(r() * 30), lig = 44 + Math.floor(r() * 20), glow = `hsl(${hue},95%,62%)`;
+    const head = Math.floor(r() * 4), ears = Math.floor(r() * 4), eyes = Math.floor(r() * 5), mouth = Math.floor(r() * 4);
+    let s = `<svg viewBox="0 0 100 70" preserveAspectRatio="xMidYMid slice" aria-hidden="true">`;
+    s += `<defs><linearGradient id="g${c.rank}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="hsl(${hue},55%,22%)"/><stop offset="1" stop-color="hsl(${(hue + 30) % 360},60%,7%)"/></linearGradient><linearGradient id="h${c.rank}" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stop-color="hsl(${skin},${sat}%,${Math.min(80, lig + 14)}%)"/><stop offset="1" stop-color="hsl(${skin},${sat + 6}%,${Math.max(18, lig - 12)}%)"/></linearGradient><radialGradient id="v${c.rank}" cx="0.5" cy="0.45" r="0.75"><stop offset="0.55" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.55"/></radialGradient></defs>`;
+    s += `<rect width="100" height="70" fill="url(#g${c.rank})"/>`;
+    for (let i = 0; i < 4; i++) s += `<circle cx="50" cy="40" r="${12 + i * 11}" fill="none" stroke="hsl(${hue},80%,60%)" stroke-opacity="${0.18 - i * 0.03}" stroke-width="1"/>`;
+    const bf = `url(#h${c.rank})`, body = `hsl(${skin},${sat}%,${lig}%)`, dark = `hsl(${skin},${sat + 5}%,${Math.max(12, lig - 24)}%)`;
+    s += `<ellipse cx="50" cy="66" rx="30" ry="3.5" fill="#000" opacity=".35"/>`;
+    if (ears === 1) s += `<circle cx="29" cy="17" r="8" fill="${bf}"/><circle cx="71" cy="17" r="8" fill="${bf}"/><circle cx="29" cy="17" r="4" fill="${dark}"/><circle cx="71" cy="17" r="4" fill="${dark}"/>`;
+    else if (ears === 2) s += `<polygon points="26,26 30,4 42,20" fill="${bf}"/><polygon points="74,26 70,4 58,20" fill="${bf}"/>`;
+    else if (ears === 3) s += `<rect x="36" y="2" width="28" height="16" rx="2" fill="${dark}"/><rect x="30" y="16" width="40" height="5" fill="${dark}"/>`;
+    s += head === 0 ? `<rect x="22" y="16" width="56" height="48" rx="14" fill="${bf}"/>`
+      : head === 1 ? `<ellipse cx="50" cy="40" rx="29" ry="25" fill="${bf}"/>`
+      : head === 2 ? `<polygon points="30,16 70,16 80,42 64,64 36,64 20,42" fill="${bf}"/>`
+      : `<rect x="20" y="18" width="60" height="46" rx="5" fill="${bf}"/><rect x="20" y="18" width="60" height="9" fill="${dark}" fill-opacity=".55"/>`;
+    const ey = 36, L = 37, Rr = 63;
+    if (eyes === 0) s += `<circle cx="${L}" cy="${ey}" r="7" fill="#fff"/><circle cx="${Rr}" cy="${ey}" r="7" fill="#fff"/><circle cx="${L + 1}" cy="${ey}" r="3.2" fill="#10151a"/><circle cx="${Rr - 1}" cy="${ey}" r="3.2" fill="#10151a"/>`;
+    else if (eyes === 1) s += `<rect x="${L - 8}" y="${ey - 2}" width="16" height="4.5" rx="2" fill="${glow}"/><rect x="${Rr - 8}" y="${ey - 2}" width="16" height="4.5" rx="2" fill="${glow}"/>`;
+    else if (eyes === 2) s += `<circle cx="${L}" cy="${ey}" r="6.5" fill="${glow}"/><circle cx="${Rr}" cy="${ey}" r="6.5" fill="${glow}"/><circle cx="${L}" cy="${ey}" r="2.2" fill="#10151a"/><circle cx="${Rr}" cy="${ey}" r="2.2" fill="#10151a"/>`;
+    else if (eyes === 3) s += `<path d="M${L - 7} ${ey - 5}l14 10m0-10l-14 10M${Rr - 7} ${ey - 5}l14 10m0-10l-14 10" stroke="${glow}" stroke-width="3" stroke-linecap="round"/>`;
+    else s += `<polygon points="${L - 8},${ey + 4} ${L + 8},${ey - 5} ${L + 8},${ey + 5}" fill="${glow}"/><polygon points="${Rr + 8},${ey + 4} ${Rr - 8},${ey - 5} ${Rr - 8},${ey + 5}" fill="${glow}"/>`;
+    s += `<circle cx="50" cy="45" r="2.6" fill="${dark}"/>`;
+    if (mouth === 0) s += `<path d="M36 53q14 9 28 0" stroke="${dark}" stroke-width="2.4" fill="none" stroke-linecap="round"/>`;
+    else if (mouth === 1) { s += `<rect x="34" y="51" width="32" height="9" rx="2" fill="#10151a"/>`; for (let i = 0; i < 5; i++) s += `<rect x="${36 + i * 6}" y="51" width="4" height="4" fill="#f2f2f2"/>`; }
+    else if (mouth === 2) s += `<polyline points="34,55 40,50 46,56 52,50 58,56 64,50" stroke="${dark}" stroke-width="2.4" fill="none" stroke-linejoin="round"/>`;
+    else s += `<rect x="38" y="52" width="24" height="6" rx="3" fill="#10151a"/><path d="M42 52v6m5-6v6m5-6v6m5-6v6" stroke="${body}" stroke-width="1.2"/>`;
+    // sets get a little signature so they read differently at a glance
+    if (c.cat === 'BU') for (let i = 0; i < 4; i++) s += `<rect x="${Math.floor(r() * 60)}" y="${8 + Math.floor(r() * 54)}" width="${20 + Math.floor(r() * 40)}" height="${2 + Math.floor(r() * 4)}" fill="${glow}" fill-opacity=".35"/>`;
+    if (c.cat === 'SSC') s += `<rect x="22" y="${28 + Math.floor(r() * 10)}" width="56" height="5" fill="#05070a" fill-opacity=".8"/>`;
+    if (c.cat === 'SS3') s += `<path d="M10 62l8-9 8 9M74 62l8-9 8 9" stroke="${glow}" stroke-opacity=".5" fill="none" stroke-width="1.5"/>`;
+    s += `<rect width="100" height="70" fill="url(#v${c.rank})"/></svg>`;
+    return s + img;
+  }
+
+  const abIcon = (k) => G.ABILITIES[k].icon;
+  // opts: holo, count, isNew, size (px), tag
+  function cardHTML(c, o) {
+    o = o || {};
+    const sp = o.holo || c.ti >= 4 ? Array.from({ length: 3 + c.ti }, (_, i) => `<i class="sparkle" style="left:${(i * 37) % 88 + 6}%;top:${(i * 53) % 80 + 8}%;animation-delay:${(i * 0.37).toFixed(2)}s"></i>`).join('') : '';
+    const label = `${c.name}, ${c.cat}, ${c.tier}${o.holo ? ', skibidi' : ''}`;
+    return `<div class="card ${tcls(c.tier)} ${o.holo ? 'holo' : ''} ${o.locked ? 'locked' : ''} ${o.ghost ? 'ghost' : ''}" ${o.size ? `style="--cw:${o.size}px"` : ''} aria-label="${esc(label)}" data-id="${c.id}">
+      <div class="card-in">
+        <div class="card-top"><span class="rank">#${c.rank}</span><span class="set-tag">${c.cat}</span><span class="tier-badge">${c.tier}</span></div>
+        <div class="art">${o.locked ? '<div class="lock">?</div>' : art(c)}</div>
+        <div class="card-body"><div class="card-name ${c.name.length > 24 ? 'long' : ''}">${o.locked ? '???' : esc(c.name)}</div></div>
+      </div>
+      <div class="foil"></div><div class="glare"></div>${sp}
+      ${o.count > 1 ? `<span class="copies">×${o.count}</span>` : ''}${o.holo ? '<span class="holo-badge">✦ SKIBIDI</span>' : ''}${o.fav ? '<span class="fav">★</span>' : ''}${o.isNew ? `<span class="new-tag">${o.isNew === 'holo' ? 'NEW SKIBIDI' : 'NEW'}</span>` : ''}
+    </div>`;
+  }
+  function tilt(el) {
+    if (reduceMotion()) return;
+    el.addEventListener('pointerenter', () => el.classList.add('tilting'));
+    el.addEventListener('pointermove', (e) => { const b = el.getBoundingClientRect(), x = (e.clientX - b.left) / b.width, y = (e.clientY - b.top) / b.height, set = (k, v) => el.style.setProperty(k, v);
+      set('--mx', (x * 100).toFixed(1) + '%'); set('--my', (y * 100).toFixed(1) + '%');
+      set('--rx', ((0.5 - y) * 26).toFixed(1) + 'deg'); set('--ry', ((x - 0.5) * 26).toFixed(1) + 'deg');
+      set('--px', ((x - 0.5) * 2).toFixed(2)); set('--py', ((y - 0.5) * 2).toFixed(2));
+      set('--sx', (-(x - 0.5) * 26).toFixed(1) + 'px'); set('--sy', (((y - 0.5) * 26) + 16).toFixed(1) + 'px'); });
+    el.addEventListener('pointerleave', () => { el.classList.remove('tilting'); ['--rx', '--ry'].forEach((k) => el.style.setProperty(k, '0deg')); ['--px', '--py'].forEach((k) => el.style.setProperty(k, '0')); });
+  }
+
+  // ---------- toast + modal ----------
+  function toast(msg, err) {
+    const t = document.createElement('div'); t.className = 'toast' + (err ? ' err' : ''); t.textContent = msg;
+    $('#toasts').append(t); setTimeout(() => t.remove(), 3200);
+  }
+  function modal(inner, cls) {
+    const bg = document.createElement('div'); bg.className = 'modal-bg';
+    bg.innerHTML = `<div class="modal ${cls || ''}" role="dialog" aria-modal="true"><button class="x" data-act="close-modal" aria-label="Close">✕</button>${inner}</div>`;
+    document.body.append(bg); document.documentElement.classList.add('modal-open');
+    bg.addEventListener('pointerdown', (e) => { if (e.target === bg) closeModal(bg); });
+    const f = $('button, a, input', $('.modal', bg)); if (f && f.dataset.act !== 'close-modal') f.focus();
+    return bg;
+  }
+  function closeModal(bg) { (bg || $$('.modal-bg').pop())?.remove(); if (!$('.modal-bg')) document.documentElement.classList.remove('modal-open'); }
+
+  // ---------- header ----------
+  const NAV = [['home', 'Packs'], ['collection', 'Collection'], ['index', 'Index'], ['options', 'Settings']];
+  const BOLT = '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M13.5 2 4 13.5h6.2L8.5 22 20 9.8h-6.6z" fill="currentColor"/></svg>';
+  function renderHeader() {
+    const cur = (location.hash.slice(1) || 'home').split('-')[0];
+    $('#header').innerHTML = `<a class="logo" href="#home">${BOLT}<span>Special Strike <b>Gacha</b></span></a>
+      <nav class="main" aria-label="Main">${NAV.map(([h, l]) => `<a href="#${h}" ${cur === h ? 'aria-current="page"' : ''}>${l}</a>`).join('')}</nav>
+      <div class="top-right"><button class="btn sm" data-act="copy-save" title="Copy your save to the clipboard">💾 Copy save</button><a class="chip" href="#home" title="Packs ready"><span class="pk"></span><b data-hud="packs">${S.packs}</b></a>
+        <button class="icon-btn" data-act="toggle-sound" aria-label="Sound ${S.settings.sound ? 'on' : 'off'}" title="Sound">${S.settings.sound ? '🔊' : '🔇'}</button></div>`;
+  }
+  function updateHud() {
+    tick();
+    $$('[data-hud="packs"]').forEach((e) => (e.textContent = S.packs));
+    const ck = $('[data-clock]'); if (ck) ck.textContent = new Date().toLocaleTimeString('en-GB');
+    const d = D(), t = $('[data-timer]');
+    if (t) {
+      const left = Math.max(0, d.interval * 60000 - (Date.now() - S.last));
+      t.textContent = S.packs >= d.cap ? 'Pack storage full' : `Next pack in ${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, '0')}`;
+    }
+    const pc = $('[data-packcount]'); if (pc) pc.innerHTML = `${S.packs} <small>/ ${d.cap}</small>`;
+    $$('[data-needpack]').forEach((b) => (b.disabled = S.packs < 1 || opening));
+    $$('[data-needall]').forEach((b) => { b.hidden = S.packs < 2; b.textContent = `Open all (${S.packs})`; });
+  }
+
+  // ---------- pack art ----------
+  const packBag = (n) => `<span class="bag" aria-hidden="true"><span class="bag-top"><span class="seam"></span></span><span class="bag-body"><span class="pack-face">${BOLT}<span class="pack-title">Special<br>Strike</span><span class="pack-sub">${CARDS_PER_PACK} cards</span></span><span class="glints"><i style="left:14%;top:24%"></i><i style="left:78%;top:12%;animation-delay:.9s"></i><i style="left:60%;top:70%;animation-delay:1.7s"></i></span></span>${n > 1 ? `<span class="pack-n">×${n}</span>` : ''}</span>`;
+
+  // ---------- pages ----------
+  const main = () => $('#main');
+  let homeTab = 'recent';
+  const HOME_TABS = [['recent', 'Recent'], ['rarest', 'Rarest'], ['fav', 'Favorites'], ['holo', 'Skibidi'], ['stats', 'Stats']];
+  function homeTabsHTML() {
+    const ents = Object.entries(S.cards).filter(([id]) => BYID[id]);
+    const rarity = (a, b) => BYID[b[0]].ti - BYID[a[0]].ti || (b[1].h > 0) - (a[1].h > 0) || a[1].n - b[1].n || BYID[a[0]].rank - BYID[b[0]].rank;
+    const grid = (list, empty) => list.length ? `<div class="card-grid small">${list.map(([id, e]) => `<button class="card-btn" data-act="card" data-id="${id}">${cardHTML(BYID[id], { holo: e.h > 0, count: e.n, fav: e.f })}</button>`).join('')}</div>` : `<div class="empty"><p>${empty}</p></div>`;
+    let body;
+    if (homeTab === 'recent') body = grid(ents.slice().sort((a, b) => b[1].t - a[1].t).slice(0, 12), 'No cards yet. Open your first pack.');
+    else if (homeTab === 'rarest') body = grid(ents.slice().sort(rarity).slice(0, 12), 'Your rarest cards will show up here once you pull some.');
+    else if (homeTab === 'fav') body = grid(ents.filter(([, e]) => e.f).sort(rarity), 'No favorites yet. Open a card and press Favorite.');
+    else if (homeTab === 'holo') body = grid(ents.filter(([, e]) => e.h > 0).sort(rarity), 'No skibidi cards yet. They are a rare shine on any pull.');
+    else {
+      const total = ents.reduce((a, [, e]) => a + e.n, 0), top = ents.slice().sort(rarity)[0], most = ents.slice().sort((a, b) => b[1].n - a[1].n)[0];
+      const first = ents.length ? new Date(Math.min(...ents.map(([, e]) => e.t))).toLocaleDateString('en-GB') : 'Not yet';
+      const facts = [[S.stats.opened, 'packs opened'], [total, 'cards pulled'], [`${ents.length}/${CARDS.length}`, 'unique cards'], [total - ents.length, 'duplicates'], [ents.filter(([, e]) => e.h > 0).length, 'skibidi cards'],
+        [top ? esc(BYID[top[0]].name) : 'None', 'rarest card'], [most ? `${esc(BYID[most[0]].name)} ×${most[1].n}` : 'None', 'most pulled'], [first, 'playing since']];
+      body = `<div class="panel facts">${facts.map(([v, l]) => `<div><b>${v}</b><span>${l}</span></div>`).join('')}</div>
+        <div class="panel"><h2>By rarity</h2><div class="tier-prog">${TIERS.map((t, i) => { const l = G.BYTIER[i], g = l.filter((c) => S.cards[c.id]).length; return `<div class="${tcls(t)}"><span>${t}</span><div class="bar"><i style="width:${l.length ? g / l.length * 100 : 0}%"></i></div><b>${g}/${l.length}</b></div>`; }).join('')}</div></div>`;
+    }
+    return `<div class="tabs" role="tablist">${HOME_TABS.map(([k, l]) => `<button class="btn sm" role="tab" data-act="home-tab" data-tab="${k}" aria-pressed="${homeTab === k}">${l}</button>`).join('')}</div>${body}
+      <p class="muted small hint">Shortcuts: <kbd>O</kbd> open pack · <kbd>A</kbd> open all · <kbd>1</kbd>–<kbd>4</kbd> switch pages · <kbd>/</kbd> search · right-click any card for details</p>`;
+  }
+  function refreshHomeTabs() { const el = $('#hometabs'); if (el) { el.innerHTML = homeTabsHTML(); $$('.card', el).forEach(tilt); } }
+
+  function pageHome() {
+    const d = D(), have = owned().length, pct = Math.round(have / CARDS.length * 100);
+    const topRare = CARDS.slice().sort((a, b) => b.ti - a.ti || a.rank - b.rank).slice(0, 8), rareHave = topRare.filter((c) => S.cards[c.id]).length;
+    const last = Object.entries(S.cards).filter(([id]) => BYID[id]).sort((a, b) => b[1].t - a[1].t).slice(0, 6);
+    main().innerHTML = `<section class="hero panel">
+        
+        <div class="hero-text"><p class="eyebrow">Special Strike</p><h1>Pull cards from the Special Strike roster.</h1>
+          <p class="muted">${CARDS.length} cards across ${Object.keys(CATS).length} sets. A free pack of ${CARDS_PER_PACK} cards every ${d.interval} minutes, up to ${d.cap} stored.</p>
+          <div class="pack-count" data-packcount aria-live="polite"></div><p class="muted small" data-timer></p></div>
+        <div class="hero-pack"><button class="pack" data-act="open-1" data-needpack aria-label="Open a pack"><span class="fan" style="--i:2">${packBag()}</span><span class="fan" style="--i:1">${packBag()}</span>${packBag()}</button>
+          <div class="row"><button class="btn primary" data-act="open-1" data-needpack>Open pack</button><button class="btn" data-act="open-all" data-needall hidden>Open all</button></div></div>
+        <div class="hero-side"><div class="stat"><b>${have}</b><span>of ${CARDS.length} cards</span></div><div class="bar"><i style="width:${pct}%"></i></div>
+          <div class="stat"><b>${S.stats.opened}</b><span>packs opened</span></div></div>
+      </section>
+      <section><h2>Your cards</h2><div id="hometabs">${homeTabsHTML()}</div></section>
+      <section class="rarest"><h2>Rarest cards in the game <span class="muted small">${rareHave}/${topRare.length} found</span></h2><p class="muted small">The hardest pulls available. Grey means you still need it.</p><div class="card-grid small rare-grid">${topRare.map((c) => { const x = S.cards[c.id]; return `<button class="card-btn" data-act="card" data-id="${c.id}">${cardHTML(c, { ghost: !x, holo: x && x.h > 0, count: x && x.n })}</button>`; }).join('')}</div></section>`;
+    $$('.card', main()).forEach(tilt); updateHud();
+  }
+
+  const colState = { cat: 'all', tier: 'all', show: 'owned', sort: 'rank', q: '' };
+  function pageCollection() {
+    main().innerHTML = `<h1>Collection</h1><p class="muted">${owned().length} of ${CARDS.length} cards found. Tap a card for details.</p>
+      <div class="filters panel">
+        <label class="f">Search<input id="colq" type="search" value="${esc(colState.q)}" placeholder="Card name" autocomplete="off"></label>
+        <label class="f">Set<select id="colcat"><option value="all">All sets</option>${Object.keys(CATS).map((k) => `<option ${colState.cat === k ? 'selected' : ''}>${k}</option>`).join('')}</select></label>
+        <label class="f">Rarity<select id="coltier"><option value="all">All rarities</option>${TIERS.map((t) => `<option ${colState.tier === t ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+        <label class="f">Show<select id="colshow">${[['owned', 'Owned'], ['missing', 'Missing'], ['all', 'Everything'], ['holo', 'Skibidi only'], ['spare', 'Spares'], ['fav', 'Favorites']].map(([v, l]) => `<option value="${v}" ${colState.show === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label class="f">Sort<select id="colsort">${[['rank', 'Rank (rarest first)'], ['recent', 'Newest'], ['name', 'Name'], ['copies', 'Copies']].map(([v, l]) => `<option value="${v}" ${colState.sort === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      </div><div id="colgrid"></div>`;
+    const draw = () => {
+      let list = CARDS.filter((c) => (colState.cat === 'all' || c.cat === colState.cat) && (colState.tier === 'all' || c.tier === colState.tier) && (!colState.q || c.name.toLowerCase().includes(colState.q.toLowerCase())));
+      const e = (c) => S.cards[c.id];
+      list = list.filter((c) => { const x = e(c); switch (colState.show) { case 'owned': return !!x; case 'missing': return !x; case 'holo': return x && x.h > 0; case 'spare': return x && x.n > 1; case 'fav': return x && x.f; default: return true; } });
+      const by = { rank: (a, b) => a.rank - b.rank, name: (a, b) => a.name.localeCompare(b.name), recent: (a, b) => (e(b)?.t || 0) - (e(a)?.t || 0), copies: (a, b) => (e(b)?.n || 0) - (e(a)?.n || 0) || a.rank - b.rank };
+      list.sort(by[colState.sort]);
+      $('#colgrid').innerHTML = list.length ? `<div class="card-grid">${list.map((c) => { const x = e(c); return `<button class="card-btn" data-act="card" data-id="${c.id}" ${x ? '' : 'aria-label="Not found yet"'}>${cardHTML(c, { locked: !x, holo: x && x.h > 0, count: x && x.n, fav: x && x.f })}</button>`; }).join('')}</div>` : '<div class="empty"><h2>Nothing here</h2><p class="muted">No cards match these filters.</p></div>';
+      $$('#colgrid .card').forEach(tilt);
+    };
+    $('#colq').oninput = (ev) => { colState.q = ev.target.value; draw(); };
+    $('#colcat').onchange = (ev) => { colState.cat = ev.target.value; draw(); };
+    $('#coltier').onchange = (ev) => { colState.tier = ev.target.value; draw(); };
+    $('#colshow').onchange = (ev) => { colState.show = ev.target.value; draw(); };
+    $('#colsort').onchange = (ev) => { colState.sort = ev.target.value; draw(); };
+    draw();
+  }
+
+  function pageIndex() {
+    const cats = Object.keys(CATS);
+    main().innerHTML = `<h1>Index</h1><p class="muted">Every card in the game, grouped by set. Greyed-out cards are ones you haven't pulled yet, and they light up the moment you get them. Right-click any card for its rarity and details.</p>` + cats.map((k) => {
+      const list = CARDS.filter((c) => c.cat === k).sort((a, b) => b.ti - a.ti || a.name.localeCompare(b.name)), got = list.filter((c) => S.cards[c.id]).length;
+      return `<section class="panel set"><div class="set-head"><div><h2>${k}</h2><p class="muted small">${CATS[k].blurb}</p></div><div class="set-prog"><b>${got}/${list.length}</b><div class="bar"><i style="width:${got / list.length * 100}%"></i></div></div></div>
+        <div class="card-grid small idx-grid">${list.map((c) => { const x = S.cards[c.id]; return `<button class="card-btn" data-act="card" data-id="${c.id}">${cardHTML(c, { ghost: !x, holo: x && x.h > 0, count: x && x.n, size: 128 })}</button>`; }).join('')}</div></section>`;
+    }).join('') + `<section class="panel"><h2>By rarity</h2><div class="tier-prog">${TIERS.map((t, i) => { const l = G.BYTIER[i], g = l.filter((c) => S.cards[c.id]).length; return `<div class="${tcls(t)}"><span>${t}</span><div class="bar"><i style="width:${g / l.length * 100}%"></i></div><b>${g}/${l.length}</b></div>`; }).join('')}</div></section>`;
+    $$('.idx-grid .card', main()).forEach(tilt);
+  }
+
+  // ---------- right-click card info ----------
+  (function () {
+    let box = null;
+    const close = () => { if (box) { box.remove(); box = null; } };
+    const pct = (x) => (x * 100).toFixed(x < 0.01 ? 2 : 1) + '%';
+    const row = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
+    function show(c, x, y) {
+      close();
+      const d = D(), w = weights(d, false), tot = w.reduce((a, b) => a + b, 0), p = w[c.ti] / tot, per = p / G.BYTIER[c.ti].length, perPack = 1 - Math.pow(1 - per, CARDS_PER_PACK), e = S.cards[c.id];
+      box = document.createElement('div'); box.className = 'ctx'; box.setAttribute('role', 'dialog');
+      box.style.setProperty('--tc', `var(--${tcls(c.tier)})`);
+      box.innerHTML = `<h3>${esc(c.name)}</h3><div class="sub">${esc(c.cat)} · Rank #${c.rank}</div><dl>
+        ${row('Rarity', `<span style="color:var(--tc)">${c.tier}</span>`)}
+        ${row('Chance per slot', pct(p))}
+        ${row('This exact card', pct(per))}
+        ${perPack > 0 ? row('Per pack', `about 1 in ${Math.round(1 / perPack).toLocaleString()}`) : ''}
+        ${row('Skibidi chance', pct(d.holo))}
+        ${typeof c.atk === 'number' ? row('ATK / HP / SPD', `${c.atk} / ${c.hp} / ${c.spd}`) : ''}</dl><hr>
+        <dl>${e ? row('Copies owned', e.n + (e.h ? ` (${e.h} skibidi)` : '')) + row('First pulled', new Date(e.t).toLocaleDateString('en-GB')) : row('Status', 'Not pulled yet')}</dl>`;
+      document.body.append(box);
+      const r = box.getBoundingClientRect();
+      box.style.left = Math.max(8, Math.min(x, innerWidth - r.width - 8)) + 'px';
+      box.style.top = Math.max(8, Math.min(y, innerHeight - r.height - 8)) + 'px';
+    }
+    document.addEventListener('contextmenu', (ev) => {
+      const el = ev.target.closest && ev.target.closest('.card[data-id]'), c = el && BYID[el.dataset.id];
+      if (!c) { close(); return; }
+      ev.preventDefault(); show(c, ev.clientX + 12, ev.clientY + 12);
+    });
+    ['click', 'scroll', 'resize', 'blur'].forEach((t) => addEventListener(t, close, true));
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  })();
+
+  function pageSettings() {
+    main().innerHTML = `<h1>Settings</h1>
+      <section class="panel"><h2>Sound and motion</h2><div class="row wrap">
+        <label class="check"><input id="optSound" type="checkbox" ${S.settings.sound ? 'checked' : ''}> Sound effects</label>
+        <label class="f inline">Volume<input id="optVol" type="range" min="0" max="1" step="0.05" value="${S.settings.volume}"></label>
+        <label class="check"><input id="optMotion" type="checkbox" ${S.settings.motion ? 'checked' : ''}> Animations</label></div></section>
+      <section class="panel"><h2>Save file</h2><p class="muted small">Your progress lives in this browser only. Clearing site data or switching browsers loses it, so keep a backup.</p>
+        <div class="row wrap"><button class="btn primary" data-act="copy-save">Copy save</button><button class="btn" data-act="download-save">Download save</button></div>
+        <label class="check" style="margin-top:14px"><input id="optLeave" type="checkbox" ${S.settings.leaveWarn ? 'checked' : ''}> Warn me before closing the page if my save isn't backed up</label>
+        <h3 style="margin:18px 0 8px">Restore a save</h3><textarea id="importText" rows="3" style="width:100%" placeholder="Paste a save code here"></textarea>
+        <div class="row wrap" style="margin-top:8px"><button class="btn" data-act="import-save">Import pasted code</button><label class="btn" style="cursor:pointer">Import from file<input id="importFile" type="file" accept=".txt,.json" hidden></label></div></section>
+      <section class="panel"><h2>The Monster 👹</h2><label class="check"><input id="optMonster" type="checkbox" ${S.settings.monster ? 'checked' : ''}> Let the monster in</label><p class="muted small">Each pack you open has a 25% chance that the monster eats one random card from it. Eaten cards are gone for good and never reach your collection.</p></section>
+      <section class="panel"><h2>Save data</h2><p class="muted small">Your progress is stored in this browser. Copy the code to move it to another device, or paste one to restore it.</p>
+        <textarea id="saveBox" rows="3" spellcheck="false" aria-label="Save code" placeholder="Save code"></textarea>
+        <div class="row wrap"><button class="btn" data-act="export">Show my save code</button><button class="btn" data-act="copy-save">Copy</button><button class="btn" data-act="import">Load this code</button></div></section>
+      <section class="panel danger-zone"><h2>Reset</h2><p class="muted small">Deletes all your cards and stats.</p><button class="btn danger" data-act="reset">Reset everything</button></section>`;
+    $('#optSound').onchange = (e) => { S.settings.sound = e.target.checked; applyAudio(); save(); renderHeader(); };
+    $('#optVol').oninput = (e) => { S.settings.volume = +e.target.value; applyAudio(); save(); };
+    $('#optMotion').onchange = (e) => { S.settings.motion = e.target.checked; save(); };
+    $('#optLeave').onchange = (e) => { S.settings.leaveWarn = e.target.checked; save(); };
+    $('#importFile').onchange = async (e) => { const f = e.target.files[0]; if (f) importSave(await f.text()); };
+    $('#optMonster').onchange = (e) => { S.settings.monster = e.target.checked; save(); toast(e.target.checked ? 'The monster is hungry...' : 'The monster went back to sleep'); };
+  }
+  function applyAudio() { configureAudio({ sound: S.settings.sound, volume: S.settings.volume }); }
+
+  // ---------- card detail ----------
+  function cardModal(id) {
+    const c = BYID[id], e = S.cards[id];
+    const bg = modal(`<div class="detail">${cardHTML(c, { locked: !e, holo: e && e.h > 0, count: e && e.n, fav: e && e.f, size: 250 })}
+      <div class="detail-info"><p class="eyebrow">${c.cat} · Rank #${c.rank}</p><h2>${e ? esc(c.name) : 'Not found yet'}</h2>
+        <p class="tier-line ${tcls(c.tier)}"><span class="tier-text">${c.tier}</span></p>
+        ${e ? `<p class="muted small">You own ${e.n} cop${e.n === 1 ? 'y' : 'ies'}${e.h ? `, ${e.h} skibidi` : ''}.</p>
+        <div class="row wrap"><button class="btn" data-act="fav" data-id="${id}">${e.f ? '★ Unfavorite' : '☆ Favorite'}</button></div>`
+        : `<p class="muted">${c.tier} card from the ${c.cat} set. Keep opening packs.</p>`}
+      </div></div>`, 'wide');
+    $$('.card', bg).forEach(tilt);
+  }
+
+  // ---------- pack opening ----------
+  let opening = false;
+  function particles(canvas) {
+    const g = canvas.getContext('2d'); let ps = [], run = true;
+    const fit = () => { canvas.width = innerWidth; canvas.height = innerHeight; }; fit(); addEventListener('resize', fit);
+    function burst(colors, n, rain, bx, by) {
+      if (reduceMotion()) n = Math.floor(n / 4);
+      for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, v = 3 + Math.random() * 9; ps.push({ x: bx != null ? bx : canvas.width / 2, y: rain ? -10 : by != null ? by : canvas.height * 0.45, vx: rain ? (Math.random() - 0.5) * 6 : Math.cos(a) * v, vy: rain ? 2 + Math.random() * 5 : Math.sin(a) * v - 3, s: 2 + Math.random() * 5, l: 1, c: pick(colors) }); }
+    }
+    (function frame() { if (!run) return; g.clearRect(0, 0, canvas.width, canvas.height);
+      ps = ps.filter((p) => p.l > 0); ps.forEach((p) => { p.x += p.vx; p.y += p.vy; p.vy += 0.18; p.vx *= 0.99; p.l -= 0.012; g.globalAlpha = Math.max(0, p.l); g.fillStyle = p.c; g.fillRect(p.x, p.y, p.s, p.s); });
+      requestAnimationFrame(frame); })();
+    return { burst, stop() { run = false; removeEventListener('resize', fit); } };
+  }
+  const TC = G.TIER_COLOR, RAINBOW = ['#ff4d6d', '#ffb02e', '#4cc38a', '#4aa3ff', '#b36bff', '#ffffff'];
+
+  const MONSTER = '<div class="monster-card"><svg viewBox="0 0 100 140" aria-hidden="true"><path d="M24 44 L16 16 L40 36Z M76 44 L84 16 L60 36Z" fill="#4ade80"/><ellipse cx="50" cy="80" rx="42" ry="48" fill="#4a24a0"/><circle cx="34" cy="64" r="11" fill="#fff"/><circle cx="66" cy="64" r="11" fill="#fff"/><circle cx="37" cy="66" r="5" fill="#111"/><circle cx="63" cy="66" r="5" fill="#111"/><path d="M20 94 Q50 132 80 94 Q50 106 20 94Z" fill="#12061f"/><path d="M27 96 L33 108 L39 98 L45 110 L51 98 L57 110 L63 98 L69 108 L75 96 Z" fill="#fff"/></svg><span>CHOMP</span></div>';
+  async function openPacks(n) {
+    tick(); n = Math.min(n, S.packs);
+    if (opening || n < 1) return;
+    opening = true; unlockAudio(); applyAudio(); updateHud();
+    const results = []; for (let i = 0; i < n; i++) { S.packs--; results.push(rollPack()); }
+    if (S.packs < D().cap) S.last = Math.max(S.last, Date.now() - (Date.now() - S.last)); save();
+    const eatenAll = results.flat().filter((o) => o.eaten); let all = results.flat().filter((o) => !o.eaten); const single = n === 1;
+    const ov = document.createElement('div'); ov.className = 'opening'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', 'Opening ' + (single ? 'a pack' : n + ' packs'));
+    ov.innerHTML = `<canvas aria-hidden="true"></canvas><div class="flash"></div><button class="btn skip">Skip</button><p class="sr-only" aria-live="assertive" id="announce"></p><div class="stage-pack"><div class="pack">${packBag(n)}</div></div><p class="tap-hint">Tap the pack</p>`;
+    document.body.append(ov); document.documentElement.classList.add('modal-open', 'pack-open');
+    const fx = particles($('canvas', ov)); let skipped = false;
+    const wait = (ms) => sleep(skipped || reduceMotion() ? Math.min(ms, 25) : ms), say = (t) => ($('#announce', ov).textContent = t);
+    $('.skip', ov).onclick = () => { skipped = true; }; $('.skip', ov).focus();
+    const stage = $('.stage-pack', ov);
+    // Tapping the pack does nothing to the result, it only feels like you're ripping it open.
+    const tapColors = ['#b794ff', '#4ade80', '#fff', '#8b5cf6'];
+    stage.addEventListener('pointerdown', (ev) => {
+      if (!stage.isConnected || stage.classList.contains('torn')) return;
+      const pk = $('.pack', stage); pk.classList.remove('tap'); void pk.offsetWidth; pk.classList.add('tap');
+      SFX.click(); SFX.flip(); fx.burst(tapColors, 14, false, ev.clientX, ev.clientY);
+      const rp = document.createElement('span'); rp.className = 'ripple'; rp.style.left = ev.clientX + 'px'; rp.style.top = ev.clientY + 'px'; ov.append(rp); setTimeout(() => rp.remove(), 600);
+    });
+    const finish = () => { fx.stop(); ov.remove(); opening = false; document.documentElement.classList.remove('pack-open'); document.documentElement.classList.toggle('modal-open', !!$('.modal-bg')); renderHeader(); route(); };
+    try {
+      for (const lvl of [1, 2, 3]) { if (skipped) break; ov.classList.remove('shake1', 'shake2', 'shake3'); ov.classList.add('shake' + lvl); for (let i = 0; i < 4 && !skipped; i++) { SFX.shake(lvl); await wait(190 - lvl * 30); } }
+      ov.classList.remove('shake1', 'shake2', 'shake3');
+      if (!skipped) { SFX.tear(); stage.classList.add('torn'); $('.flash', ov).classList.add('go'); fx.burst(['#b794ff', '#4ade80', '#fff', '#8b5cf6'], 90); await wait(950); }
+      stage.remove(); $('.tap-hint', ov)?.remove();
+      const sorted = all.slice().sort((a, b) => b.card.ti - a.card.ti || (b.holo ? 1 : 0) - (a.holo ? 1 : 0) || a.card.rank - b.card.rank);
+      if (single) {
+        const cs = results[0].slice().sort((a, b) => a.card.ti - b.card.ti);
+        const row = document.createElement('div'); row.className = 'reveal-row';
+        row.innerHTML = cs.map((o, i) => `<div class="slot ${o.eaten ? 'eaten' : tcls(o.card.tier)}" data-i="${i}"><div class="flipper"><div class="face back"><div class="card-back">${BOLT}</div></div><div class="face front">${o.eaten ? MONSTER : cardHTML(o.card, { holo: o.holo, isNew: o.isNew })}</div></div><div class="reveal-label"></div></div>`).join('');
+        ov.append(row);
+        for (let i = 0; i < cs.length && !skipped; i++) {
+          const o = cs[i], c = o.card, slot = $(`.slot[data-i="${i}"]`, row);
+          await wait(380); if (skipped) break;
+          if (o.eaten) { SFX.tear(); $('.flipper', slot).classList.add('flipped'); slot.classList.add('revealed'); fx.burst(['#ff4d6d', '#4ade80', '#000'], 60); $('.reveal-label', slot).innerHTML = `<span class="monster-line">The monster ate <b>${esc(c.name)}</b>!</span>`; say(`The monster ate ${c.name}`); await wait(1200); continue; }
+          if (c.ti >= 3) { slot.classList.add('suspense'); for (let k = 0; k < 3 && !skipped; k++) { SFX.shake(2); await wait(220); } slot.classList.remove('suspense'); }
+          if (c.ti >= 4) await specialReveal(ov, o, fx, () => skipped);
+          SFX.flip(); $('.flipper', slot).classList.add('flipped'); slot.classList.add('revealed'); SFX.reveal(c.ti);
+          if (o.holo) { setTimeout(() => SFX.holo(), 150); fx.burst(RAINBOW, 80, true); } else if (c.ti >= 3) fx.burst([TC[c.tier], '#fff'], 30 + c.ti * 16);
+          $('.reveal-label', slot).innerHTML = `<span class="tier-text ${tcls(c.tier)}">${c.tier}</span>${o.holo ? ' <span class="holo-badge static">SKIBIDI</span>' : ''}`;
+          say(`Card ${i + 1}: ${c.name}, ${c.tier}${o.holo ? ', skibidi' : ''}${o.isNew ? ', new' : ''}`);
+          await wait(c.ti >= 4 ? 900 : 430);
+        }
+        if (!skipped) await wait(650);
+        row.remove();
+      } else {
+        for (const o of sorted) { if (skipped) break; if (o.card.ti >= 4) await specialReveal(ov, o, fx, () => skipped); }
+        if (!skipped) { SFX.reveal(sorted[0].card.ti); }
+      }
+      $('.skip', ov)?.remove(); $('.special', ov)?.remove();
+      // summary
+      const best = sorted[0], fresh = all.filter((o) => o.isNew).length, holos = all.filter((o) => o.holo).length;
+      const counts = TIERS.map((t) => [t, all.filter((o) => o.card.tier === t).length]).filter((x) => x[1]).reverse();
+      const sum = document.createElement('div'); sum.className = 'summary';
+      const shown = single ? sorted : sorted.slice(0, 40);
+      sum.innerHTML = `<h2>${single ? 'Pack opened' : `Opened ${n} packs`}</h2><p class="muted">Best pull: <b class="tier-text ${tcls(best.card.tier)}">${best.card.tier}</b> ${esc(best.card.name)} (${best.card.cat})</p>
+        <p class="pack-new ${fresh ? '' : 'none'}">${fresh ? `✦ ${fresh} new for your collection` : 'No new cards this time.'}${results.some((r) => r.some((o) => o.pity)) ? ' · Pity pull triggered' : ''}</p>
+        <p class="row counts">${counts.map(([t, k]) => `<span class="${tcls(t)}"><span class="tier-text">${t}</span> ×${k}</span>`).join('')}${holos ? `<span class="holo-badge static">✦ SKIBIDI ×${holos}</span>` : ''}</p>
+        <div class="card-grid summary-grid">${shown.map((o, i) => `<button class="card-btn" data-i="${i}">${cardHTML(o.card, { holo: o.holo, isNew: o.isNew })}</button>`).join('')}</div>
+        ${all.length > shown.length ? `<p class="muted small">Showing the best ${shown.length} of ${all.length} cards. All are saved to your collection.</p>` : ''}
+        <div class="row center">${S.packs >= 1 ? `<button class="btn primary" id="again">Open another (${S.packs} left)</button>` : ''}${S.packs >= 2 ? `<button class="btn" id="againAll">Open all (${S.packs})</button>` : ''}<a class="btn" href="#collection" id="toCol">View collection</a><button class="btn" id="done">Continue</button></div>`;
+      ov.append(sum); if (eatenAll.length) sum.insertAdjacentHTML('afterbegin', `<p class="monster-note">👹 The monster ate ${eatenAll.map((o) => '<b>' + esc(o.card.name) + '</b>').join(', ')}</p>`); $$('.card', sum).forEach((el, i) => { el.style.animationDelay = Math.min(i * 30, 900) + 'ms'; tilt(el); });
+      if (all.some((o) => o.holo)) setTimeout(() => SFX.holo(), 200);
+      $('#done', sum).focus({ preventScroll: true });
+      sum.addEventListener('click', (ev) => { const b = ev.target.closest('.card-btn'); if (b) cardModal(shown[b.dataset.i].card.id); });
+      const act = await new Promise((resolve) => {
+        $('#done', sum).onclick = () => resolve('done'); $('#toCol', sum).onclick = () => resolve('col');
+        if ($('#again', sum)) $('#again', sum).onclick = () => resolve('again'); if ($('#againAll', sum)) $('#againAll', sum).onclick = () => resolve('all');
+      });
+      finish();
+      if (act === 'again') setTimeout(() => openPacks(1), 60); else if (act === 'all') setTimeout(() => openPacks(S.packs), 60);
+    } catch (err) { console.error(err); toast('Something went wrong showing the cards. They are saved in your collection.', true); finish(); }
+  }
+  async function specialReveal(ov, o, fx, isSkipped) {
+    if (isSkipped()) return; const c = o.card;
+    const sp = document.createElement('div'); sp.className = 'special ' + tcls(c.tier);
+    sp.innerHTML = `<div class="sp-rays"></div><div class="sp-text">${c.tier === 'Sigma' ? 'SIGMA' : c.tier.toUpperCase()} PULL</div>`;
+    ov.append(sp); SFX[c.ti >= 6 ? 'apex' : 'reveal'](c.ti); fx.burst(c.ti >= 6 ? RAINBOW : [TC[c.tier], '#fff'], 120);
+    const ms = c.ti >= 6 ? 2300 : 1300; const t0 = Date.now();
+    while (Date.now() - t0 < ms && !isSkipped()) await sleep(40);
+    sp.remove();
+  }
+
+  // ---------- events ----------
+  document.addEventListener('click', async (e) => {
+    const t = e.target.closest('[data-act]'); if (!t) return;
+    const act = t.dataset.act, id = t.dataset.id; unlockAudio(); applyAudio();
+    switch (act) {
+      case 'close-modal': closeModal(t.closest('.modal-bg')); break;
+      case 'toggle-sound': S.settings.sound = !S.settings.sound; applyAudio(); save(); renderHeader(); if (S.settings.sound) SFX.click(); break;
+      case 'open-1': SFX.click(); openPacks(1); break;
+      case 'open-all': SFX.click(); openPacks(S.packs); break;
+      case 'card': SFX.click(); cardModal(id); break;
+      case 'home-tab': homeTab = t.dataset.tab; refreshHomeTabs(); break;
+      case 'copy-save': copySave(); break;
+      case 'download-save': downloadSave(); break;
+      case 'import-save': importSave(($('#importText') || {}).value || ''); break;
+      case 'fav': { const x = S.cards[id]; if (x) { x.f = x.f ? 0 : 1; save(); closeModal(); cardModal(id); route(); } break; }
+      case 'export': try { $('#saveBox').value = btoa(unescape(encodeURIComponent(JSON.stringify(S)))); } catch (er) { toast('Could not make a save code', true); } break;
+      case 'copy-save': { const b = $('#saveBox'); if (!b.value) $('[data-act="export"]').click(); b.select(); try { await navigator.clipboard.writeText(b.value); toast('Save code copied'); } catch (er) { document.execCommand && document.execCommand('copy'); toast('Select and copy the code'); } break; }
+      case 'import': try { const j = JSON.parse(decodeURIComponent(escape(atob($('#saveBox').value.trim())))); if (!j || !j.cards) throw 0; S = Object.assign(fresh(), j); save(); renderHeader(); toast('Save loaded'); pageSettings(); } catch (er) { toast('That is not a valid save code', true); } break;
+      case 'reset': if (!t.dataset.sure) { t.dataset.sure = 1; t.textContent = 'Press again to erase everything'; setTimeout(() => { if (t.isConnected) { delete t.dataset.sure; t.textContent = 'Reset everything'; } }, 4000); break; }
+        S = fresh(); save(); renderHeader(); route(); toast('Save reset'); break;
+    }
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { const m = $$('.modal-bg').pop(); if (m && !$('.welcome', m)) closeModal(m); } });
+
+  // ---------- router ----------
+  // ---------- quality of life: keyboard shortcuts + pack count in tab title ----------
+  (function () {
+    const baseTitle = document.title.replace(/^\(\d+\)\s*/, '');
+    setInterval(() => { document.title = (S.packs > 0 ? `(${S.packs}) ` : '') + baseTitle; }, 1000);
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test((e.target.tagName || ''))) return;
+      if (document.documentElement.classList.contains('modal-open')) return;
+      const k = e.key.toLowerCase(), click = (sel) => { const b = document.querySelector(sel); if (b && !b.disabled && !b.hidden) { e.preventDefault(); b.click(); } };
+      if (k === 'o') click('[data-act="open-1"]'); else if (k === 'a') click('[data-act="open-all"]');
+      else if (/^[1-9]$/.test(k) && NAV[k - 1]) { location.hash = '#' + NAV[k - 1][0]; }
+      else if (k === '/') { e.preventDefault(); location.hash = '#collection'; setTimeout(() => { const q = document.getElementById('colq'); if (q) q.focus(); }, 80); }
+    });
+  })();
+
+  // ---------- save backup + close warning ----------
+  const exportCode = () => btoa(unescape(encodeURIComponent(JSON.stringify(S))));
+  async function copySave() {
+    const code = exportCode(); backupDirty = false;
+    try { await navigator.clipboard.writeText(code); toast('Save copied. Paste it somewhere safe.'); } catch (e) { window.prompt('Copy your save code (Ctrl+C), then keep it somewhere safe:', code); }
+  }
+  function downloadSave() {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([exportCode()], { type: 'text/plain' })); a.download = 'special-strike-save.txt';
+    document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1500); backupDirty = false; toast('Save file downloaded');
+  }
+  function importSave(text) {
+    try {
+      text = String(text).trim(); let j;
+      try { j = JSON.parse(text); } catch (e) { j = JSON.parse(decodeURIComponent(escape(atob(text)))); }
+      if (!j || typeof j.cards !== 'object' || !j.stats) throw new Error('bad');
+      if (!window.confirm('Replace your current progress with this save?')) return;
+      allowLeave = true; localStorage.setItem(KEY, JSON.stringify(j)); location.reload();
+    } catch (e) { toast('That does not look like a valid save.', true); }
+  }
+  addEventListener('beforeunload', (e) => {
+    if (allowLeave || !S.settings.leaveWarn || !backupDirty || S.stats.opened < 1) return;
+    e.preventDefault(); e.returnValue = '';
+    // Browsers hide custom text in their own dialog. If the player stays, show ours.
+    setTimeout(() => { if (!$('.backup')) modal('<div class="backup"><h2>Back up your save first</h2><p class="muted">Your cards are stored only in this browser. Copy your save so you can restore it if it is ever lost.</p><div class="row wrap"><button class="btn primary" data-act="copy-save">Copy save</button><button class="btn" data-act="download-save">Download save</button></div></div>'); }, 300);
+  });
+
+  const PAGES = { home: pageHome, collection: pageCollection, index: pageIndex, options: pageSettings };
+  function route() {
+    const h = (location.hash.slice(1) || 'home'), fn = PAGES[h] || pageHome;
+    renderHeader(); fn(); updateHud();
+    document.title = 'Special Strike Gacha';
+  }
+  addEventListener('hashchange', () => { route(); scrollTo(0, 0); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) updateHud(); });
+  setInterval(updateHud, 1000);
+  applyAudio();
+  tick(); route();
+  window.__ssg = { get S() { return S; }, save, route };
+})();
