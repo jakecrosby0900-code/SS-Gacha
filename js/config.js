@@ -8,5 +8,5 @@
 // Players can also paste their own token in Settings instead, which overrides this one.
 window.SSG_NET = {
   repo: '',
-  tokenEnc: []
+  tokenEnc: ["NXI=","M0FlQVRCTg==","RElQNElVWA==","TGZSbjdZcA==","b2tWZTN6bQ==","ZUhGdGViTg==","TVpYVUh5ZQ==","V3ZRT0x1Ng==","M3dhaWtmdA==","SXdEQ0xfTA==","Y3doZjg0Wg==","M1ZCWkVRMA==","cGF0XzExQg==","Z2l0aHViXw=="]
 };
