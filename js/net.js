@@ -1,0 +1,347 @@
+// Online layer: leaderboard, public profiles, cloud save and trading, all through GitHub Issues.
+//
+// How it works (no server):
+//  - Every player owns ONE issue titled "player:<id> <name>". Its body is JSON: their profile and collection.
+//    While the site is open the client rewrites it about every 60 seconds. That is the "published save".
+//  - A trade offer is ONE issue titled "trade:<id> ...". The JSON body holds who, what is offered and wanted, and a status.
+//    The sender's offered cards are held in escrow (removed from their collection) until the offer is settled.
+//  - Everybody reads the open issues list to get the leaderboard, other profiles and trade offers.
+//  - A GitHub Action snapshots the players into data/leaderboard.json, which is the read-only fallback for visitors without a token.
+(function () {
+  'use strict';
+  window.SSGNet = function (ctx) {
+    const G = ctx.G, BYID = G.BYID, CARDS = G.CARDS, esc = ctx.esc, $ = ctx.$, $$ = ctx.$$;
+    const S = () => ctx.S();
+    const LS = 'ss-gacha-net', EVERY = 60000, ONLINE_MS = 150000, BEAT_MS = 240000, MAX_BODY = 64000;
+    const net = { dir: [], trades: [], status: 'off', msg: '', last: 0, busy: false, lastKey: '', lastBeat: 0, createdAt: 0, loaded: false };
+    const view = { by: 'score', q: '' };
+    const okImg = (v) => (typeof v === 'string' && /^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(v) && v.length < 200000 ? v : null);
+    const nm = (v) => String(v == null ? '' : v).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 20) || 'Player';
+    const idOk = (v) => (typeof v === 'string' && /^[a-z0-9]{6,40}$/.test(v) ? v : null);
+
+    // ---------- connection ----------
+    function stored() { try { return JSON.parse(localStorage.getItem(LS) || '{}') || {}; } catch (e) { return {}; } }
+    function detectRepo() {
+      const m = /^([^.]+)\.github\.io$/.exec(location.hostname); if (!m) return '';
+      const seg = location.pathname.split('/').filter(Boolean)[0];
+      return seg && !/\.html?$/.test(seg) ? m[1] + '/' + seg : m[1] + '/' + m[1] + '.github.io';
+    }
+    function conf() {
+      const base = window.SSG_NET || {}, st = stored();
+      let shared = ''; try { shared = Array.isArray(base.tokenEnc) && base.tokenEnc.length ? base.tokenEnc.slice().reverse().map(atob).join('') : ''; } catch (e) { shared = ''; }
+      return { repo: st.repo || base.repo || detectRepo(), token: st.token || shared, api: String(st.api || base.api || 'https://api.github.com').replace(/\/$/, ''), personal: !!st.token };
+    }
+    const enabled = () => { const c = conf(); return !!(c.repo && c.token); };
+    async function gh(method, path, body) {
+      const c = conf(), headers = { Accept: 'application/vnd.github+json' };
+      if (c.token) headers.Authorization = 'Bearer ' + c.token;
+      if (body) headers['Content-Type'] = 'application/json';
+      const r = await fetch(c.api + path, { method, headers, body: body ? JSON.stringify(body) : undefined, cache: 'no-store' });
+      if (!r.ok) {
+        const e = new Error(r.status === 401 ? 'Token rejected (401)' : r.status === 403 || r.status === 429 ? 'GitHub rate limit or permission problem (' + r.status + ')' : r.status === 404 ? 'Repo or issue not found (404). Check the repo name and token access.' : 'GitHub error ' + r.status);
+        e.status = r.status; throw e;
+      }
+      return r.status === 204 ? null : r.json();
+    }
+
+    // ---------- reading other players ----------
+    function derive(p) {
+      let score = 0, unique = 0, sk = 0, best = null;
+      Object.keys(p.cards).forEach((id) => { const c = BYID[id], e = p.cards[id]; unique++; score += c.pts; if (e.h > 0) sk++; if (!best || c.ti > best.ti || (c.ti === best.ti && c.rank < best.rank)) best = c; });
+      p.score = score; p.unique = unique; p.skibidi = sk; p.rarest = best ? best.name : null;
+      return p;
+    }
+    function cleanPlayer(b, num) {
+      const id = idOk(b.id); if (!id) return null;
+      const cards = {};
+      if (b.cards && typeof b.cards === 'object') Object.keys(b.cards).forEach((cid) => { const a = b.cards[cid]; if (BYID[cid] && Array.isArray(a) && +a[0] > 0) { const n = Math.min(9999, +a[0] | 0); cards[cid] = { n: n, h: Math.min(n, Math.max(0, +a[1] | 0)), f: a[2] ? 1 : 0, t: +a[3] || 0, l: +a[4] || 0 }; } });
+      return derive({ id: id, name: nm(b.name), hue: Number.isFinite(+b.hue) ? ((+b.hue % 360) + 360) % 360 : 28, pfp: okImg(b.pfp), banner: okImg(b.banner), joined: +b.joined || 0, seen: +b.seen || 0,
+        opened: +(b.opened) || 0, pulls: +(b.pulls) || 0, cards: cards, num: num, full: true, raw: b.save && typeof b.save === 'object' ? b.save : null });
+    }
+    const items = (a) => (Array.isArray(a) ? a.slice(0, 12).map((x) => ({ id: String(x && x.id), h: x && x.h ? 1 : 0 })).filter((x) => BYID[x.id]) : []);
+    function cleanTrade(b, num) {
+      const tid = idOk(b.id), f = b.from || {}, t = b.to || {};
+      if (!tid || !idOk(f.id) || !idOk(t.id)) return null;
+      return { id: tid, num: num, from: { id: f.id, name: nm(f.name) }, to: { id: t.id, name: nm(t.name) }, give: items(b.give), want: items(b.want), at: +b.at || 0,
+        status: ['open', 'accepted', 'declined', 'cancelled'].indexOf(b.status) >= 0 ? b.status : 'open' };
+    }
+    async function refresh() {
+      const c = conf(); let all = [];
+      for (let page = 1; page <= 5; page++) {
+        const r = await gh('GET', `/repos/${c.repo}/issues?state=open&per_page=100&page=${page}`);
+        all = all.concat(r.filter((i) => !i.pull_request)); if (r.length < 100) break;
+      }
+      const players = {}, trades = [];
+      all.forEach((i) => {
+        let b; try { b = JSON.parse(i.body); } catch (e) { return; }
+        if (!b || typeof b !== 'object') return;
+        if (b.t === 'player') { const p = cleanPlayer(b, i.number); if (p && (!players[p.id] || players[p.id].num > p.num)) players[p.id] = p; }
+        else if (b.t === 'trade') { const t = cleanTrade(b, i.number); if (t) trades.push(t); }
+      });
+      net.dir = Object.keys(players).map((k) => players[k]); net.trades = trades; net.last = Date.now(); net.loaded = true;
+    }
+    async function fallback() {
+      if (net.loaded && Date.now() - net.last < 60000) return;
+      try {
+        const r = await fetch('data/leaderboard.json?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) throw 0;
+        const j = await r.json();
+        net.dir = (j.players || []).filter((p) => idOk(p.id)).map((p) => ({ id: p.id, name: nm(p.name), hue: +p.hue || 28, pfp: okImg(p.pfp), banner: null, joined: +p.joined || 0, seen: +p.seen || 0, opened: +p.opened || 0, pulls: 0, cards: {},
+          score: +p.score || 0, unique: +p.unique || 0, skibidi: +p.skibidi || 0, rarest: p.rarest ? String(p.rarest).slice(0, 40) : null, full: false }));
+        net.last = Date.now(); net.loaded = true;
+      } catch (e) { net.loaded = true; net.last = Date.now(); }
+    }
+    const isMe = (p) => p.id === S().profile.id;
+    const online = (p) => isMe(p) ? net.status === 'ok' : Date.now() - p.seen < ONLINE_MS;
+
+    // ---------- publishing my account ----------
+    function build() {
+      const s = S(), p = s.profile, cards = {};
+      Object.keys(s.cards).forEach((id) => { const e = s.cards[id]; if (BYID[id] && e.n > 0) cards[id] = [e.n, e.h || 0, e.f ? 1 : 0, e.t || 0, e.l || 0]; });
+      return { t: 'player', v: 1, id: p.id, name: p.name, hue: p.hue, pfp: p.pfp, banner: p.banner, joined: p.joined, seen: Date.now(), opened: s.stats.opened, pulls: s.stats.pulls, cards: cards,
+        save: { packs: s.packs, last: s.last, sinceRare: s.sinceRare, started: s.started, stats: s.stats, codes: s.codes, net: s.net } };
+    }
+    async function publish(force) {
+      const s = S(), c = conf(), snap = build(), key = JSON.stringify(Object.assign({}, snap, { seen: 0 }));
+      const mine = net.dir.find(isMe);
+      if (!force && key === net.lastKey && Date.now() - net.lastBeat < BEAT_MS && (mine || Date.now() - net.createdAt < 120000)) return;
+      let body = JSON.stringify(snap);
+      if (body.length > MAX_BODY) { delete snap.banner; body = JSON.stringify(snap); }
+      if (body.length > MAX_BODY) { delete snap.pfp; body = JSON.stringify(snap); }
+      const title = `player:${s.profile.id} ${s.profile.name}`.replace(/[\r\n]+/g, ' ');
+      if (mine) await gh('PATCH', `/repos/${c.repo}/issues/${mine.num}`, { title: title, body: body });
+      else if (Date.now() - net.createdAt > 120000) {
+        try { await gh('POST', `/repos/${c.repo}/issues`, { title: title, body: body, labels: ['player'] }); }
+        catch (e) { if (e.status === 422) await gh('POST', `/repos/${c.repo}/issues`, { title: title, body: body }); else throw e; }
+        net.createdAt = Date.now();
+      }
+      net.lastKey = key; net.lastBeat = Date.now();
+    }
+
+    // ---------- trading ----------
+    const names = (a) => a.map((it) => BYID[it.id].name + (it.h ? ' (skibidi)' : '')).join(', ');
+    function hist(text) { const h = S().net.hist; h.unshift({ at: Date.now(), text: text }); h.length = Math.min(h.length, 30); }
+    const incoming = () => net.trades.filter((t) => t.status === 'open' && t.to.id === S().profile.id && !S().net.done[t.id]);
+    const outgoing = () => Object.keys(S().net.out).map((tid) => Object.assign({ id: tid }, S().net.out[tid], { live: net.trades.find((t) => t.id === tid) }));
+    function prune() { const d = S().net.done, k = Object.keys(d); if (k.length > 200) k.slice(0, k.length - 200).forEach((x) => delete d[x]); }
+    function completeOut(tid, kind) {
+      const s = S(), o = s.net.out[tid]; if (!o) return;
+      if (kind === 'accepted') { o.want.forEach((it) => ctx.addCopy(it.id, it.h)); hist(`${o.toName} accepted your trade. You got ${o.want.length ? names(o.want) : 'nothing (a gift)'}.`); }
+      else { o.give.forEach((it) => ctx.addCopy(it.id, it.h)); hist(`Your trade with ${o.toName} was ${kind}. Your cards came back.`); }
+      s.net.q.push({ num: o.num, tid: tid, set: { ack: 1 }, close: true });
+      delete s.net.out[tid]; delete s.net.miss[tid]; s.net.done[tid] = 1; prune();
+    }
+    // Looks at the sent offers: pay out accepted ones, refund declined/cancelled/vanished ones.
+    function settle() {
+      const s = S(); let changed = false;
+      Object.keys(s.net.out).forEach((tid) => {
+        const o = s.net.out[tid], tr = net.trades.find((t) => t.id === tid);
+        if (tr) { s.net.miss[tid] = 0; o.num = o.num || tr.num; if (tr.status === 'accepted') { completeOut(tid, 'accepted'); changed = true; } else if (tr.status !== 'open') { completeOut(tid, tr.status); changed = true; } }
+        else if (Date.now() - o.at > 180000) { s.net.miss[tid] = (s.net.miss[tid] || 0) + 1; if (s.net.miss[tid] >= 3) { completeOut(tid, 'lost'); changed = true; } }
+      });
+      return changed;
+    }
+    async function flushQ() {
+      const s = S(), c = conf(); let wrote = false;
+      for (const it of s.net.q.slice()) {
+        try {
+          const cur = await gh('GET', `/repos/${c.repo}/issues/${it.num}`); let b = null; try { b = JSON.parse(cur.body); } catch (e) { /* not ours */ }
+          if (b && b.t === 'trade') await gh('PATCH', `/repos/${c.repo}/issues/${it.num}`, { body: JSON.stringify(Object.assign(b, it.set)), state: it.close ? 'closed' : undefined });
+          s.net.q.splice(s.net.q.indexOf(it), 1); wrote = true;
+        } catch (e) { if (e.status === 404 || e.status === 410) s.net.q.splice(s.net.q.indexOf(it), 1); else break; }
+      }
+      if (wrote) ctx.save();
+    }
+    async function createTrade(toId, give, want) {
+      const s = S(), c = conf(), to = net.dir.find((p) => p.id === toId);
+      if (!to) throw new Error('Player not found');
+      if (!give.length && !want.length) throw new Error('Pick at least one card');
+      give.forEach((it) => { if (!ctx.hasCopy(it.id, it.h)) throw new Error('You no longer own ' + BYID[it.id].name); });
+      const tid = ctx.uid().replace(/[^a-z0-9]/g, '');
+      give.forEach((it) => ctx.takeCopy(it.id, it.h));
+      s.net.out[tid] = { to: toId, toName: to.name, give: give, want: want, at: Date.now(), num: 0 }; ctx.save();
+      const body = { t: 'trade', id: tid, from: { id: s.profile.id, name: s.profile.name }, to: { id: to.id, name: to.name }, give: give, want: want, status: 'open', at: Date.now() };
+      const issue = { title: `trade:${tid} ${s.profile.name} → ${to.name}`.replace(/[\r\n]+/g, ' '), body: JSON.stringify(body), labels: ['trade'] };
+      try {
+        let r; try { r = await gh('POST', `/repos/${c.repo}/issues`, issue); } catch (e) { if (e.status === 422) { delete issue.labels; r = await gh('POST', `/repos/${c.repo}/issues`, issue); } else throw e; }
+        s.net.out[tid].num = r.number; ctx.save();
+      } catch (e) { give.forEach((it) => ctx.addCopy(it.id, it.h)); delete s.net.out[tid]; ctx.save(); throw e; }
+    }
+    async function accept(tid) {
+      const s = S(), c = conf(), tr = net.trades.find((t) => t.id === tid);
+      if (!tr || tr.status !== 'open' || s.net.done[tid]) { toast('That offer is not available any more', true); return; }
+      try { const cur = await gh('GET', `/repos/${c.repo}/issues/${tr.num}`), b = JSON.parse(cur.body); if (b.status !== 'open') { toast('That offer is not available any more', true); await cycle(true); return; } }
+      catch (e) { toast('Could not reach GitHub: ' + e.message, true); return; }
+      const need = {}; tr.want.forEach((it) => { const k = it.id + '|' + it.h; need[k] = (need[k] || 0) + 1; });
+      for (const k of Object.keys(need)) { const [id, h] = k.split('|'), e = s.cards[id]; const have = e ? (h === '1' ? e.h : e.n - e.h) : 0; if (have < need[k]) { toast('You do not have the cards they want', true); return; } }
+      tr.want.forEach((it) => ctx.takeCopy(it.id, it.h)); tr.give.forEach((it) => ctx.addCopy(it.id, it.h));
+      s.net.done[tid] = 1; prune(); hist(`You accepted ${tr.from.name}'s trade: got ${tr.give.length ? names(tr.give) : 'nothing'}, gave ${tr.want.length ? names(tr.want) : 'nothing'}.`);
+      s.net.q.push({ num: tr.num, tid: tid, set: { status: 'accepted', by: s.profile.id, at: Date.now() } }); ctx.save();
+      toast('Trade accepted'); await flushQ(); repaint(true);
+    }
+    async function decline(tid) {
+      const s = S(), tr = net.trades.find((t) => t.id === tid); if (!tr) return;
+      s.net.done[tid] = 1; hist(`You declined ${tr.from.name}'s trade.`);
+      s.net.q.push({ num: tr.num, tid: tid, set: { status: 'declined' } }); ctx.save(); await flushQ(); repaint(true);
+    }
+    async function cancel(tid) {
+      const s = S(), c = conf(), o = s.net.out[tid]; if (!o) return;
+      try {
+        const num = o.num || (net.trades.find((t) => t.id === tid) || {}).num; if (!num) throw new Error('Offer not found yet, try again in a moment');
+        const cur = await gh('GET', `/repos/${c.repo}/issues/${num}`), b = JSON.parse(cur.body);
+        if (b.status === 'open') { b.status = 'cancelled'; await gh('PATCH', `/repos/${c.repo}/issues/${num}`, { body: JSON.stringify(b) }); }
+        else toast('They already answered this offer');
+        await refresh(); if (settle()) ctx.save(); repaint(true);
+      } catch (e) { toast(e.message, true); }
+    }
+    const toast = (m, err) => ctx.toast(m, err);
+
+    // ---------- sync loop ----------
+    let changedFlag = false;
+    async function cycle(force) {
+      if (net.busy) return; net.busy = true; changedFlag = false;
+      try {
+        if (!enabled()) { await fallback(); net.status = 'off'; net.msg = ''; }
+        else {
+          await refresh(); changedFlag = settle(); if (changedFlag) ctx.save();
+          await flushQ(); if (S().settings.share) await publish(force);
+          net.status = 'ok'; net.msg = '';
+        }
+      } catch (e) { net.status = 'err'; net.msg = e.message || 'Sync failed'; }
+      net.busy = false; paint(); repaint(changedFlag);
+    }
+    function statusText() {
+      if (net.status === 'ok') return `Online · synced ${Math.max(0, Math.round((Date.now() - net.last) / 1000))}s ago${S().settings.share ? '' : ' · not sharing your profile'}`;
+      if (net.status === 'err') return 'Sync problem: ' + net.msg;
+      return conf().repo ? 'Read-only: add a GitHub token in Settings to appear on the leaderboard and trade.' : 'Offline: no GitHub repo detected (set one in Settings).';
+    }
+    function paint() {
+      const d = $('[data-netdot]'); if (d) { d.className = 'netdot ' + net.status; d.title = statusText(); }
+      const n = incoming().length; $$('[data-tradebadge]').forEach((b) => { b.hidden = !n; b.textContent = n; });
+      const st = $('#plstatus'); if (st) st.textContent = statusText();
+      const ss = $('#netstatus'); if (ss) ss.textContent = statusText();
+    }
+    function repaint(changed) {
+      if ($('.modal-bg') || ctx.busy()) return;
+      const h = location.hash.slice(1) || 'home';
+      if (h === 'players') drawPlayers(); else if (h === 'trades') drawTrades(); else if (h.indexOf('user-') === 0) ctx.route();
+      else if (changed && h !== 'options') ctx.route();
+    }
+
+    // ---------- pages ----------
+    const SORTS = [['score', 'Score'], ['unique', 'Unique cards'], ['opened', 'Packs opened'], ['skibidi', 'Skibidi cards'], ['seen', 'Recently online']];
+    function pagePlayers() {
+      $('#main').innerHTML = `<h1>Players</h1><p class="muted" id="plstatus"></p>
+        <div class="filters panel"><label class="f">Find a player<input id="plq" type="search" value="${esc(view.q)}" placeholder="Name or ID" autocomplete="off"></label>
+        <label class="f">Rank by<select id="plsort">${SORTS.map(([v, l]) => `<option value="${v}" ${view.by === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div><div id="pllist"></div>`;
+      $('#plq').oninput = (e) => { view.q = e.target.value; drawPlayers(); };
+      $('#plsort').onchange = (e) => { view.by = e.target.value; drawPlayers(); };
+      drawPlayers(); paint(); if (Date.now() - net.last > 20000) cycle();
+    }
+    function drawPlayers() {
+      const box = $('#pllist'); if (!box) return;
+      const q = view.q.trim().toLowerCase(), key = view.by;
+      let list = net.dir.filter((p) => !q || p.name.toLowerCase().includes(q) || p.id.includes(q));
+      list = list.slice().sort((a, b) => (b[key] - a[key]) || (b.score - a.score) || a.name.localeCompare(b.name));
+      const medal = ['🥇', '🥈', '🥉'];
+      box.innerHTML = list.length ? `<div class="pl-list">${list.map((p, i) => `<a class="pl-row ${isMe(p) ? 'me' : ''}" href="#user-${p.id}"><span class="pl-rank">${!q && i < 3 ? medal[i] : i + 1}</span>${ctx.avatarHTML(42, p)}
+          <span class="pl-name"><span class="pl-top"><b>${esc(p.name)}</b>${isMe(p) ? ' <small class="muted">(you)</small>' : ''}${online(p) ? ' <span class="online-dot" title="Online now"></span>' : ''}</span><small class="muted">${p.unique}/${CARDS.length} cards · ${p.opened} packs · ${p.skibidi} skibidi</small></span>
+          <span class="pl-score"><b>${ctx.fmt(p.score)}</b><small>pts</small></span></a>`).join('')}</div>`
+        : `<div class="empty"><h2>${net.loaded ? 'No players found' : 'Loading...'}</h2><p class="muted">${net.loaded && !q ? 'Nobody has published a profile yet.' : ''}</p></div>`;
+    }
+    function pageUser(id) {
+      const p = net.dir.find((x) => x.id === id);
+      if (!p) { $('#main').innerHTML = `<div class="empty"><h2>${net.loaded ? 'Player not found' : 'Loading...'}</h2><p><a class="btn" href="#players">← All players</a></p></div>`; if (!net.loaded || Date.now() - net.last > 20000) cycle(); return; }
+      const me = isMe(p), can = enabled() && !me && p.full && S().settings.share;
+      const actions = `<a class="btn" href="#players">← Players</a>${me ? '<button class="btn" data-act="edit-profile">✎ Edit profile</button>' : ''}${can ? `<button class="btn primary" data-net="trade" data-id="${p.id}">⇄ Trade with ${esc(p.name)}</button>` : ''}`;
+      $('#main').innerHTML = ctx.profileHTML(p, p.cards, { opened: p.opened }, actions, true, { score: p.score, unique: p.unique, skibidi: p.skibidi, rarest: p.rarest, lite: !p.full, online: online(p) });
+      $$('.card', $('#main')).forEach(ctx.tilt);
+    }
+    const mini = (list) => `<div class="tr-cards">${list.length ? list.map((it) => `<div class="tr-card">${ctx.cardHTML(BYID[it.id], { holo: !!it.h, size: 84 })}</div>`).join('') : '<span class="muted small">nothing</span>'}</div>`;
+    function pageTrades() {
+      $('#main').innerHTML = `<div class="row wrap between"><h1>Trades</h1><button class="btn primary" data-net="trade" ${enabled() ? '' : 'disabled'}>⇄ New trade</button></div><p class="muted" id="plstatus"></p><div id="trlist"></div>`;
+      drawTrades(); paint(); if (Date.now() - net.last > 20000) cycle();
+    }
+    function drawTrades() {
+      const box = $('#trlist'); if (!box) return;
+      if (!enabled()) { box.innerHTML = '<div class="panel"><h2>Trading needs GitHub</h2><p class="muted">Add a GitHub token in <a href="#options">Settings</a> (or ask whoever runs this site for the shared one) to trade with other players.</p></div>'; return; }
+      const s = S(), inc = incoming(), out = outgoing();
+      box.innerHTML = `<section><h2>Offers for you <span class="muted small">${inc.length}</span></h2>${inc.length ? inc.map((t) => {
+          const ok = t.want.every((it) => ctx.hasCopy(it.id, it.h));
+          return `<div class="panel tr-offer"><div class="tr-head"><b>${esc(t.from.name)}</b> <span class="muted">offers</span></div>${mini(t.give)}<div class="tr-head"><span class="muted">${t.want.length ? 'and wants' : 'as a gift'}</span></div>${t.want.length ? mini(t.want) : ''}
+            <div class="row wrap"><button class="btn primary" data-net="accept" data-id="${t.id}" ${ok ? '' : 'disabled'}>Accept</button><button class="btn" data-net="decline" data-id="${t.id}">Decline</button>${ok ? '' : '<span class="muted small">You do not have the cards they want.</span>'}</div></div>`;
+        }).join('') : '<div class="empty"><p>No offers right now.</p></div>'}</section>
+        <section><h2>Your offers <span class="muted small">${out.length}</span></h2>${out.length ? out.map((o) => `<div class="panel tr-offer"><div class="tr-head">To <b>${esc(o.toName)}</b> <span class="muted small">· waiting for an answer · your cards are held until it is settled</span></div>${mini(o.give)}<div class="tr-head"><span class="muted">${o.want.length ? 'for' : 'as a gift'}</span></div>${o.want.length ? mini(o.want) : ''}
+          <div class="row wrap"><button class="btn" data-net="cancel" data-id="${o.id}">Cancel offer</button></div></div>`).join('') : '<div class="empty"><p>You have no offers out.</p></div>'}</section>
+        <section><h2>History</h2>${s.net.hist.length ? `<ul class="tr-hist">${s.net.hist.map((h) => `<li><span class="muted small">${new Date(h.at).toLocaleString('en-GB')}</span> ${esc(h.text)}</li>`).join('')}</ul>` : '<div class="empty"><p>Nothing yet.</p></div>'}</section>`;
+    }
+    // Two pickers: what you give (from your collection) and what you want (from theirs).
+    function tradeModal(pre) {
+      if (!enabled()) { toast('Add a GitHub token in Settings first', true); return; }
+      const s = S(), others = net.dir.filter((p) => !isMe(p) && p.full);
+      if (!others.length) { toast('No other players are online yet', true); return; }
+      if (!s.settings.share) { toast('Turn on sharing in Settings so others can answer you', true); return; }
+      const st = { to: others.some((p) => p.id === pre) ? pre : others[0].id, give: {}, want: {} };
+      const bg = ctx.modal(`<h2>New trade</h2><label class="f">Trade with<select id="trTo">${others.map((p) => `<option value="${p.id}" ${p.id === st.to ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+        <div class="tr-cols"><div><h3>You give <span class="muted small" id="trGn"></span></h3><div id="trGive" class="tr-pick"></div></div>
+        <div><h3>You get <span class="muted small" id="trWn"></span></h3><p class="muted small">Pick nothing to send a gift.</p><div id="trWant" class="tr-pick"></div></div></div>
+        <div class="row wrap" style="margin-top:14px"><button class="btn primary" id="trSend" type="button">Send offer</button><button class="btn" data-act="close-modal" type="button">Cancel</button></div>`, 'wide');
+      const tiles = (cards) => { const out = []; Object.keys(cards).sort((a, b) => BYID[a].rank - BYID[b].rank).forEach((id) => { const e = cards[id]; if (!BYID[id] || e.n <= 0) return; if (e.n - e.h > 0) out.push({ id: id, h: 0, n: e.n - e.h }); if (e.h > 0) out.push({ id: id, h: 1, n: e.h }); }); return out; };
+      const fill = (el, list, sel, cnt) => {
+        el.innerHTML = list.length ? list.map((t) => `<button type="button" class="card-btn ${sel[t.id + '|' + t.h] ? 'picked' : ''}" data-k="${t.id}|${t.h}">${ctx.cardHTML(BYID[t.id], { holo: !!t.h, count: t.n, size: 84 })}</button>`).join('') : '<p class="muted small">Nothing to pick.</p>';
+        $(cnt, bg).textContent = Object.keys(sel).filter((k) => sel[k]).length ? `(${Object.keys(sel).filter((k) => sel[k]).length} picked)` : '';
+      };
+      const draw = () => { const them = net.dir.find((p) => p.id === st.to);
+        fill($('#trGive', bg), tiles(s.cards), st.give, '#trGn'); fill($('#trWant', bg), them ? tiles(them.cards) : [], st.want, '#trWn'); };
+      draw();
+      $('#trTo', bg).onchange = (e) => { st.to = e.target.value; st.want = {}; draw(); };
+      const click = (key) => (e) => { const b = e.target.closest('[data-k]'); if (!b) return; st[key][b.dataset.k] = !st[key][b.dataset.k]; draw(); };
+      $('#trGive', bg).onclick = click('give'); $('#trWant', bg).onclick = click('want');
+      $('#trSend', bg).onclick = async () => {
+        const conv = (m) => Object.keys(m).filter((k) => m[k]).map((k) => { const [id, h] = k.split('|'); return { id: id, h: +h }; });
+        const btn = $('#trSend', bg); btn.disabled = true;
+        try { await createTrade(st.to, conv(st.give), conv(st.want)); ctx.closeModal(bg); toast('Offer sent'); location.hash = '#trades'; if (location.hash === '#trades') drawTrades(); }
+        catch (e) { toast(e.message, true); btn.disabled = false; }
+      };
+    }
+
+    // ---------- settings panel ----------
+    function settingsHTML() {
+      const c = conf(), st = stored();
+      return `<section class="panel"><h2>Online 🌐</h2><p class="muted small" id="netstatus">${esc(statusText())}</p>
+        <label class="check"><input id="optShare" type="checkbox" ${S().settings.share ? 'checked' : ''}> Share my profile and save online (needed for the leaderboard and trading)</label>
+        <div class="row wrap" style="margin-top:10px"><label class="f">GitHub repo<input id="netRepo" value="${esc(st.repo || '')}" placeholder="${esc(detectRepo() || (window.SSG_NET && window.SSG_NET.repo) || 'owner/name')}" autocomplete="off"></label>
+        <label class="f">Your own GitHub token (optional)<input id="netTok" type="password" value="${esc(st.token || '')}" placeholder="${c.token && !c.personal ? 'Using the site\'s shared token' : 'github_pat_...'}" autocomplete="off"></label></div>
+        <div class="row wrap" style="margin-top:10px"><button class="btn" id="netSave">Save connection</button><button class="btn" id="netSync">Sync now</button></div>
+        <p class="muted small">Your player ID: <code>${esc(S().profile.id)}</code></p>
+        <h3 style="margin:16px 0 6px">Restore from the cloud</h3><p class="muted small">Moving to a new device? Enter your player ID to pull your last published save. This replaces what is on this device.</p>
+        <div class="row wrap"><label class="f"><input id="netRid" placeholder="Player ID" autocomplete="off"></label><button class="btn" id="netRestore">Restore</button></div></section>`;
+    }
+    function bindSettings() {
+      $('#optShare').onchange = (e) => { S().settings.share = e.target.checked; ctx.save(); toast(e.target.checked ? 'Sharing on' : 'Sharing off'); cycle(true); };
+      $('#netSave').onclick = () => { const o = {}, r = $('#netRepo').value.trim(), t = $('#netTok').value.trim(), old = stored(); if (r) o.repo = r; if (t) o.token = t; if (old.api) o.api = old.api; try { localStorage.setItem(LS, JSON.stringify(o)); } catch (e) { /* ignore */ } net.loaded = false; toast('Saved'); cycle(true); };
+      $('#netSync').onclick = async () => { await cycle(true); paint(); toast(net.status === 'ok' ? 'Synced' : statusText(), net.status !== 'ok'); };
+      $('#netRestore').onclick = async () => {
+        const id = $('#netRid').value.trim().toLowerCase(); if (!id) return;
+        try {
+          await refresh(); const p = net.dir.find((x) => x.id === id);
+          if (!p || !p.raw) { toast('No published save found for that ID', true); return; }
+          if (!window.confirm(`Replace this device's save with the one published by ${p.name}?`)) return;
+          const cards = {}; Object.keys(p.cards).forEach((k) => { cards[k] = { n: p.cards[k].n, h: p.cards[k].h, f: p.cards[k].f, t: p.cards[k].t, l: p.cards[k].l }; });
+          ctx.restore(Object.assign({}, p.raw, { cards: cards, profile: { id: p.id, name: p.name, hue: p.hue, pfp: p.pfp, banner: p.banner, joined: p.joined }, settings: S().settings }));
+        } catch (e) { toast('Could not restore: ' + e.message, true); }
+      };
+    }
+
+    function start() {
+      document.addEventListener('click', (e) => {
+        const t = e.target.closest('[data-net]'); if (!t || t.disabled) return;
+        const a = t.dataset.net, id = t.dataset.id;
+        if (a === 'trade') tradeModal(id); else if (a === 'accept') accept(id); else if (a === 'decline') decline(id); else if (a === 'cancel') cancel(id);
+      });
+      setInterval(() => { if (!document.hidden) cycle(); }, EVERY);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - net.last > 15000) cycle(); });
+      paint(); setTimeout(() => cycle(true), 600);
+    }
+    return { start: start, paint: paint, cycle: cycle, pagePlayers: pagePlayers, pageUser: pageUser, pageTrades: pageTrades, settingsHTML: settingsHTML, bindSettings: bindSettings, state: net, build: build };
+  };
+})();

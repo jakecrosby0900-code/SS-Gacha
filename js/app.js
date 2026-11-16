@@ -21,12 +21,31 @@
   let memorySave = null; // used if localStorage is blocked
   function fresh() {
     return { v: 1, started: false, diff: 'sigma', packs: DIFFS.sigma.start, last: Date.now(), sinceRare: 0, cards: {},
-      stats: { opened: 0, pulls: 0 }, settings: { sound: true, volume: 0.6, motion: true, monster: false, leaveWarn: true } };
+      stats: { opened: 0, pulls: 0 }, settings: { sound: true, volume: 0.6, motion: true, monster: false, leaveWarn: true, share: true },
+      // The "fake account": lives in the save file. id is random and only there so a leaderboard can tell players apart later.
+      profile: { id: uid(), name: 'Player', pfp: null, banner: null, hue: 28, joined: Date.now() }, codes: [],
+      // trading + online bookkeeping: out = offers I sent (cards held in escrow), done = settled trade ids, q = updates still to send, hist = recent trade log
+      net: { out: {}, done: {}, q: [], hist: [], miss: {} } };
+  }
+  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+  const isObj = (x) => x && typeof x === 'object' && !Array.isArray(x);
+  const okImg = (v) => (typeof v === 'string' && /^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(v) && v.length < 400000 ? v : null);
+  // Turns any parsed save (old or new) into a complete, safe one.
+  function normalize(j) {
+    const f = fresh(), jp = (j && j.profile) || {};
+    const s = Object.assign(f, j, { diff: 'sigma', stats: Object.assign(f.stats, j.stats), settings: Object.assign(f.settings, j.settings) });
+    const times = Object.values(s.cards || {}).map((e) => e && e.t).filter(Boolean);
+    s.profile = { id: String(jp.id || f.profile.id).slice(0, 40), name: String(jp.name || 'Player').slice(0, 20), pfp: okImg(jp.pfp), banner: okImg(jp.banner),
+      hue: Number.isFinite(+jp.hue) ? ((+jp.hue % 360) + 360) % 360 : 28, joined: +jp.joined || (times.length ? Math.min.apply(null, times) : Date.now()) };
+    s.codes = Array.isArray(j.codes) ? j.codes.map(String) : [];
+    const jn = (j && j.net) || {};
+    s.net = { out: isObj(jn.out) ? jn.out : {}, done: isObj(jn.done) ? jn.done : {}, q: Array.isArray(jn.q) ? jn.q.slice(0, 50) : [], hist: Array.isArray(jn.hist) ? jn.hist.slice(0, 30) : [], miss: isObj(jn.miss) ? jn.miss : {} };
+    return s;
   }
   function load() {
     let raw = null;
     try { raw = localStorage.getItem(KEY); } catch (e) { raw = memorySave; }
-    if (raw) { try { const j = JSON.parse(raw); return Object.assign(fresh(), j, { diff: 'sigma',  stats: Object.assign(fresh().stats, j.stats), settings: Object.assign(fresh().settings, j.settings) }); } catch (e) { /* fall through */ } }
+    if (raw) { try { return normalize(JSON.parse(raw)); } catch (e) { /* fall through */ } }
     return fresh();
   }
   let S = load();
@@ -43,25 +62,37 @@
   }
   function weights(d, forceRare) { return G.BASE_WEIGHTS.map((w, i) => (forceRare && i < 2 ? 0 : i >= 2 ? w * d.luck : w)); }
   function pickIdx(w) { let t = w.reduce((a, b) => a + b, 0), r = Math.random() * t; for (let i = 0; i < w.length; i++) { r -= w[i]; if (r < 0) return i; } return w.length - 1; }
-  function rollCard(d, force) { const tier = G.BYTIER[pickIdx(weights(d, force))]; return pick(tier); }
+  function rollCard(d, force) { const tier = G.POOL[pickIdx(weights(d, force))]; return pick(tier); }
+  // Monster-only cards: weighted by tier, so the rarer ones really are rare.
+  function rollMonsterCard() { return G.MONSTER_POOL[pickIdx(G.MONSTER_POOL.map((c) => G.BASE_WEIGHTS[c.ti]))]; }
   function rollPack() {
     const d = D(), out = [];
-    for (let i = 0; i < CARDS_PER_PACK; i++) out.push({ card: rollCard(d, false), holo: Math.random() < d.holo });
+    for (let i = 0; i < CARDS_PER_PACK; i++) {
+      if (S.settings.monster && Math.random() < G.MONSTER_CHANCE) out.push({ card: rollMonsterCard(), holo: Math.random() < d.holo, monsterDrop: true });
+      else out.push({ card: rollCard(d, false), holo: Math.random() < d.holo });
+    }
     if (out.some((o) => o.card.ti >= 2)) S.sinceRare = 0;
     else { S.sinceRare++; if (d.pity && S.sinceRare >= d.pity) { out[out.length - 1] = { card: rollCard(d, true), holo: Math.random() < d.holo, pity: true }; S.sinceRare = 0; } }
-    if (S.settings.monster && Math.random() < 0.25) out[Math.floor(Math.random() * out.length)].eaten = true;
+    // The monster never eats its own cards.
+    if (S.settings.monster && Math.random() < 0.25) { const ok = out.filter((o) => !o.card.monster); if (ok.length) pick(ok).eaten = true; }
     out.forEach((o) => {
       if (o.eaten) return;
       const e = S.cards[o.card.id];
       o.isNew = !e ? 'card' : (o.holo && !e.h ? 'holo' : '');
-      if (!e) S.cards[o.card.id] = { n: 1, h: o.holo ? 1 : 0, t: Date.now(), f: 0 };
-      else { e.n++; if (o.holo) e.h++; }
+      if (!e) S.cards[o.card.id] = { n: 1, h: o.holo ? 1 : 0, t: Date.now(), l: Date.now(), f: 0 };
+      else { e.n++; e.l = Date.now(); if (o.holo) e.h++; }
     });
     S.stats.opened++; S.stats.pulls += out.filter((o) => !o.eaten).length;
     return out;
   }
   const owned = () => Object.keys(S.cards).filter((id) => BYID[id] && S.cards[id].n > 0);
-  const power = (c, holo) => Math.round((c.atk * 2 + c.hp + c.spd) * (holo ? 1.1 : 1));
+  // Moving single copies of cards in and out of the collection (used by trading). h = 1 means a skibidi copy.
+  function hasCopy(id, h) { const e = S.cards[id]; return !!(BYID[id] && e && (h ? e.h > 0 : e.n - e.h > 0)); }
+  function takeCopy(id, h) { if (!hasCopy(id, h)) return false; const e = S.cards[id]; e.n--; if (h) e.h--; if (e.n <= 0) delete S.cards[id]; return true; }
+  function addCopy(id, h) { if (!BYID[id]) return; const now = Date.now(), e = S.cards[id]; if (!e) S.cards[id] = { n: 1, h: h ? 1 : 0, t: now, l: now, f: 0 }; else { e.n++; if (h) e.h++; e.l = now; } }
+  // Collection score: points of every different card you own.
+  const score = () => owned().reduce((a, id) => a + BYID[id].pts, 0);
+  const lastSeen = (e) => e.l || e.t;
 
   // ---------- card art (all procedural, no image files) ----------
   function art(c) {
@@ -101,12 +132,12 @@
     return s + img;
   }
 
-  const abIcon = (k) => G.ABILITIES[k].icon;
-  // opts: holo, count, isNew, size (px), tag
+  // opts: holo, count, size (px), locked, ghost, fav
+  const newLabel = (isNew) => (isNew ? `<span class="new-under">${isNew === 'holo' ? 'NEW SKIBIDI' : 'NEW!'}</span>` : '');
   function cardHTML(c, o) {
     o = o || {};
     const sp = o.holo || c.ti >= 4 ? Array.from({ length: 3 + c.ti }, (_, i) => `<i class="sparkle" style="left:${(i * 37) % 88 + 6}%;top:${(i * 53) % 80 + 8}%;animation-delay:${(i * 0.37).toFixed(2)}s"></i>`).join('') : '';
-    const label = `${c.name}, ${c.cat}, ${c.tier}${o.holo ? ', skibidi' : ''}`;
+    const label = `${o.locked ? 'Not found yet' : c.name}, ${c.cat}, ${c.tier}${o.holo ? ', skibidi' : ''}`;
     return `<div class="card ${tcls(c.tier)} ${o.holo ? 'holo' : ''} ${o.locked ? 'locked' : ''} ${o.ghost ? 'ghost' : ''}" ${o.size ? `style="--cw:${o.size}px"` : ''} aria-label="${esc(label)}" data-id="${c.id}">
       <div class="card-in">
         <div class="card-top"><span class="rank">#${c.rank}</span><span class="set-tag">${c.cat}</span><span class="tier-badge">${c.tier}</span></div>
@@ -114,7 +145,7 @@
         <div class="card-body"><div class="card-name ${c.name.length > 24 ? 'long' : ''}">${o.locked ? '???' : esc(c.name)}</div></div>
       </div>
       <div class="foil"></div><div class="glare"></div>${sp}
-      ${o.count > 1 ? `<span class="copies">×${o.count}</span>` : ''}${o.holo ? '<span class="holo-badge">✦ SKIBIDI</span>' : ''}${o.fav ? '<span class="fav">★</span>' : ''}${o.isNew ? `<span class="new-tag">${o.isNew === 'holo' ? 'NEW SKIBIDI' : 'NEW'}</span>` : ''}
+      ${o.count > 1 ? `<span class="copies">×${o.count}</span>` : ''}${o.holo ? '<span class="holo-badge">✦ SKIBIDI</span>' : ''}${o.fav ? '<span class="fav">★</span>' : ''}${o.locked ? '' : `<span class="pts">${c.pts} pt${c.pts === 1 ? '' : 's'}</span>`}
     </div>`;
   }
   function tilt(el) {
@@ -144,27 +175,121 @@
   function closeModal(bg) { (bg || $$('.modal-bg').pop())?.remove(); if (!$('.modal-bg')) document.documentElement.classList.remove('modal-open'); }
 
   // ---------- header ----------
-  const NAV = [['home', 'Packs'], ['collection', 'Collection'], ['index', 'Index'], ['options', 'Settings']];
+  const NAV = [['home', 'Packs'], ['collection', 'Collection'], ['index', 'Index'], ['players', 'Players'], ['trades', 'Trades'], ['profile', 'Profile'], ['options', 'Settings']];
+  let net = null; // the online layer (js/net.js), created at the bottom
   const BOLT = '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M13.5 2 4 13.5h6.2L8.5 22 20 9.8h-6.6z" fill="currentColor"/></svg>';
   function renderHeader() {
-    const cur = (location.hash.slice(1) || 'home').split('-')[0];
+    const cur0 = (location.hash.slice(1) || 'home').split('-')[0], cur = cur0 === 'user' ? 'players' : cur0;
     $('#header').innerHTML = `<a class="logo" href="#home">${BOLT}<span>Special Strike <b>Gacha</b></span></a>
-      <nav class="main" aria-label="Main">${NAV.map(([h, l]) => `<a href="#${h}" ${cur === h ? 'aria-current="page"' : ''}>${l}</a>`).join('')}</nav>
-      <div class="top-right"><button class="btn sm" data-act="copy-save" title="Copy your save to the clipboard">💾 Copy save</button><a class="chip" href="#home" title="Packs ready"><span class="pk"></span><b data-hud="packs">${S.packs}</b></a>
+      <nav class="main" aria-label="Main">${NAV.map(([h, l]) => `<a href="#${h}" ${cur === h ? 'aria-current="page"' : ''}>${l}${h === 'trades' ? '<span class="nbadge" data-tradebadge hidden></span>' : ''}</a>`).join('')}</nav>
+      <div class="top-right"><button class="btn sm" data-act="redeem" title="Enter a pack code">🎁 Code</button><button class="btn sm" data-act="copy-save" title="Copy your save to the clipboard">💾 Copy save</button><a class="chip" href="#home" title="Packs ready"><span class="pk"></span><b data-hud="packs">${S.packs}</b></a>
+        <a class="me" href="#profile" title="${esc(S.profile.name)}">${avatarHTML(32)}<i class="netdot" data-netdot></i></a>
         <button class="icon-btn" data-act="toggle-sound" aria-label="Sound ${S.settings.sound ? 'on' : 'off'}" title="Sound">${S.settings.sound ? '🔊' : '🔇'}</button></div>`;
+    if (net) net.paint();
   }
   function updateHud() {
     tick();
     $$('[data-hud="packs"]').forEach((e) => (e.textContent = S.packs));
     const ck = $('[data-clock]'); if (ck) ck.textContent = new Date().toLocaleTimeString('en-GB');
-    const d = D(), t = $('[data-timer]');
-    if (t) {
-      const left = Math.max(0, d.interval * 60000 - (Date.now() - S.last));
-      t.textContent = S.packs >= d.cap ? 'Pack storage full' : `Next pack in ${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, '0')}`;
+    const d = D(), ring = $('[data-ring]');
+    if (ring) {
+      const full = S.packs >= d.cap, iv = d.interval * 60000, left = Math.max(0, iv - (Date.now() - S.last)), C = 2 * Math.PI * 52;
+      ring.style.strokeDasharray = C.toFixed(1); ring.style.strokeDashoffset = (full ? 0 : C * (left / iv)).toFixed(1);
+      $('[data-ringtime]').textContent = full ? 'FULL' : `${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, '0')}`;
+      $('[data-ringlabel]').textContent = full ? 'pack storage' : 'next pack';
+      ring.closest('.ring-wrap').classList.toggle('full', full);
     }
     const pc = $('[data-packcount]'); if (pc) pc.innerHTML = `${S.packs} <small>/ ${d.cap}</small>`;
     $$('[data-needpack]').forEach((b) => (b.disabled = S.packs < 1 || opening));
     $$('[data-needall]').forEach((b) => { b.hidden = S.packs < 2; b.textContent = `Open all (${S.packs})`; });
+  }
+
+  // ---------- profile ----------
+  const bannerCSS = (p) => (p.banner ? `background-image:url(${p.banner})` : `background-image:linear-gradient(120deg,hsl(${p.hue},62%,34%),hsl(${(p.hue + 55) % 360},60%,14%))`);
+  function avatarHTML(size, prof) {
+    const p = prof || S.profile, st = `--s:${size}px`;
+    return p.pfp ? `<img class="avatar" src="${p.pfp}" alt="" style="${st}" draggable="false">` : `<span class="avatar ph" aria-hidden="true" style="${st};background:hsl(${p.hue},58%,42%)">${esc((p.name.trim()[0] || '?').toUpperCase())}</span>`;
+  }
+  // Crops the picked image to fill w x h and shrinks it so the save file stays small.
+  function readImage(file, w, h, q) {
+    return new Promise((res, rej) => {
+      const url = URL.createObjectURL(file), img = new Image();
+      img.onload = () => { const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d'); g.fillStyle = '#111'; g.fillRect(0, 0, w, h);
+        const sc = Math.max(w / img.width, h / img.height), dw = img.width * sc, dh = img.height * sc; g.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh); URL.revokeObjectURL(url); res(c.toDataURL('image/jpeg', q)); };
+      img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('bad image')); }; img.src = url;
+    });
+  }
+  const HUES = [8, 28, 48, 135, 172, 200, 268, 330];
+  function editProfile() {
+    const d = { name: S.profile.name, pfp: S.profile.pfp, banner: S.profile.banner, hue: S.profile.hue };
+    const bg = modal(`<h2>Edit profile</h2>
+      <div class="pe-preview"><div class="pf-banner" id="peBanner"></div><span id="peAvatar"></span></div>
+      <label class="f">Name<input id="peName" maxlength="20" value="${esc(d.name)}" autocomplete="off"></label>
+      <div class="row wrap pe-row"><label class="btn" style="cursor:pointer">Profile picture<input id="pePfp" type="file" accept="image/*" hidden></label><button class="btn" id="pePfpX" type="button">Remove</button></div>
+      <div class="row wrap pe-row"><label class="btn" style="cursor:pointer">Banner<input id="peBan" type="file" accept="image/*" hidden></label><button class="btn" id="peBanX" type="button">Remove</button></div>
+      <p class="muted small" style="margin:10px 0 6px">Accent colour (used when there is no picture)</p>
+      <div class="swatches">${HUES.map((h) => `<button type="button" class="sw" data-hue="${h}" style="background:hsl(${h},62%,46%)" aria-label="Colour ${h}"></button>`).join('')}</div>
+      <p class="muted small">Pictures are cropped and shrunk, then stored in your save file.</p>
+      <div class="row wrap" style="margin-top:14px"><button class="btn primary" id="peSave" type="button">Save</button><button class="btn" data-act="close-modal" type="button">Cancel</button></div>`);
+    const draw = () => {
+      const tmp = Object.assign({}, S.profile, d); $('#peBanner', bg).setAttribute('style', bannerCSS(tmp));
+      $('#peAvatar', bg).innerHTML = avatarHTML(84, tmp);
+      $$('.sw', bg).forEach((b) => b.classList.toggle('on', +b.dataset.hue === d.hue));
+    };
+    draw();
+    $('#peName', bg).oninput = (e) => { d.name = e.target.value; draw(); };
+    $$('.sw', bg).forEach((b) => (b.onclick = () => { d.hue = +b.dataset.hue; draw(); }));
+    const pick1 = (sel, w, h, q, key) => ($(sel, bg).onchange = async (e) => { const f = e.target.files[0]; if (!f) return; try { d[key] = okImg(await readImage(f, w, h, q)); draw(); } catch (er) { toast('Could not read that image', true); } e.target.value = ''; });
+    pick1('#pePfp', 160, 160, 0.85, 'pfp'); pick1('#peBan', 720, 240, 0.75, 'banner');
+    $('#pePfpX', bg).onclick = () => { d.pfp = null; draw(); }; $('#peBanX', bg).onclick = () => { d.banner = null; draw(); };
+    $('#peSave', bg).onclick = () => {
+      S.profile.name = (d.name.trim() || 'Player').slice(0, 20); S.profile.pfp = d.pfp; S.profile.banner = d.banner; S.profile.hue = d.hue;
+      save(); closeModal(bg); renderHeader(); route(); toast('Profile saved');
+    };
+  }
+  // Used for your own profile and for other players' profiles. ov overrides the computed numbers (for players we only have a summary of).
+  function profileHTML(p, cards, stats, actions, full, ov) {
+    ov = ov || {};
+    const ents = Object.entries(cards).filter(([id, e]) => BYID[id] && e.n > 0);
+    const grid = (list, empty) => list.length ? `<div class="card-grid small">${list.map(([id, e]) => `<button class="card-btn" data-act="card" data-id="${id}">${cardHTML(BYID[id], { holo: e.h > 0, count: e.n, fav: e.f })}</button>`).join('')}</div>` : `<div class="empty"><p>${empty}</p></div>`;
+    const byRar = (a, b) => BYID[b[0]].ti - BYID[a[0]].ti || BYID[a[0]].rank - BYID[b[0]].rank;
+    const recent = ents.slice().sort((a, b) => lastSeen(b[1]) - lastSeen(a[1])).slice(0, 12);
+    const favs = ents.filter(([, e]) => e.f).sort(byRar), top = ents.slice().sort(byRar)[0];
+    const sc = ov.score != null ? ov.score : ents.reduce((a, [id]) => a + BYID[id].pts, 0);
+    const uniq = ov.unique != null ? ov.unique : ents.length, sk = ov.skibidi != null ? ov.skibidi : ents.filter(([, e]) => e.h > 0).length;
+    const rare = ov.rarest !== undefined ? ov.rarest : (top ? BYID[top[0]].name : null);
+    const facts = [[fmt(sc), 'collection score'], [`${uniq}/${CARDS.length}`, 'unique cards'], [stats.opened || 0, 'packs opened'], [sk, 'skibidi cards'], [rare ? esc(rare) : 'None yet', 'rarest card']];
+    const sections = ov.lite ? `<p class="muted">Only a summary is available right now. Connect GitHub in Settings to see their cards.</p>`
+      : `<section><h2>Recent cards</h2>${grid(recent, 'No cards yet.')}</section><section><h2>Favorite cards</h2>${grid(favs, 'No favorites yet.')}</section>${full ? `<section><h2>Collection <span class="muted small">${ents.length} cards</span></h2>${grid(ents.slice().sort(byRar), 'Nothing yet.')}</section>` : ''}`;
+    return `<section class="panel profile"><div class="pf-banner" style="${bannerCSS(p)}"></div>
+        <div class="pf-head">${avatarHTML(104, p)}<div class="pf-id"><h1>${esc(p.name)}${ov.online ? ' <span class="online-dot" title="Online now"></span>' : ''}</h1><p class="muted small">Playing since ${new Date(p.joined).toLocaleDateString('en-GB')} · ID ${esc(String(p.id).slice(-6))}</p></div><div class="row wrap pf-actions">${actions || ''}</div></div>
+        <div class="facts pf-facts">${facts.map(([v, l]) => `<div><b>${v}</b><span>${l}</span></div>`).join('')}</div></section>${sections}`;
+  }
+  function pageProfile() {
+    main().innerHTML = profileHTML(S.profile, S.cards, S.stats, '<button class="btn" data-act="edit-profile">✎ Edit profile</button>', false);
+    $$('.card', main()).forEach(tilt);
+  }
+
+  // ---------- pack codes ----------
+  const CODEMAP = {}; Object.keys(G.CODES).forEach((k) => (CODEMAP[k.toUpperCase()] = G.CODES[k]));
+  function redeem(raw) {
+    const k = String(raw).trim().toUpperCase(), c = CODEMAP[k];
+    if (!k) return false;
+    if (!c) { toast('That code does not exist', true); return false; }
+    if (S.codes.includes(k)) { toast('You already used that code', true); return false; }
+    S.codes.push(k); const now = Date.now(), got = [];
+    if (c.packs) S.packs += c.packs;
+    (c.cards || []).forEach((id) => { if (!BYID[id]) return; const e = S.cards[id]; if (!e) S.cards[id] = { n: 1, h: 0, t: now, l: now, f: 0 }; else { e.n++; e.l = now; } got.push(BYID[id].name); });
+    save(); renderHeader(); if (!opening) route();
+    toast(`Code accepted${c.packs ? `: +${c.packs} pack${c.packs === 1 ? '' : 's'}` : ''}${got.length ? ` and ${got.join(', ')}` : ''}`);
+    return true;
+  }
+  function redeemModal() {
+    const bg = modal(`<h2>Enter a code</h2><p class="muted small">Pack codes give you free packs. Each code works once per save.</p>
+      <label class="f">Code<input id="codeIn" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="e.g. WELCOME"></label>
+      <div class="row wrap" style="margin-top:12px"><button class="btn primary" id="codeGo" type="button">Redeem</button></div>`);
+    const go = () => { if (redeem($('#codeIn', bg).value)) closeModal(bg); };
+    $('#codeGo', bg).onclick = go; $('#codeIn', bg).onkeydown = (e) => { if (e.key === 'Enter') go(); }; $('#codeIn', bg).focus();
   }
 
   // ---------- pack art ----------
@@ -179,36 +304,36 @@
     const rarity = (a, b) => BYID[b[0]].ti - BYID[a[0]].ti || (b[1].h > 0) - (a[1].h > 0) || a[1].n - b[1].n || BYID[a[0]].rank - BYID[b[0]].rank;
     const grid = (list, empty) => list.length ? `<div class="card-grid small">${list.map(([id, e]) => `<button class="card-btn" data-act="card" data-id="${id}">${cardHTML(BYID[id], { holo: e.h > 0, count: e.n, fav: e.f })}</button>`).join('')}</div>` : `<div class="empty"><p>${empty}</p></div>`;
     let body;
-    if (homeTab === 'recent') body = grid(ents.slice().sort((a, b) => b[1].t - a[1].t).slice(0, 12), 'No cards yet. Open your first pack.');
+    if (homeTab === 'recent') body = grid(ents.slice().sort((a, b) => lastSeen(b[1]) - lastSeen(a[1])).slice(0, 12), 'No cards yet. Open your first pack.');
     else if (homeTab === 'rarest') body = grid(ents.slice().sort(rarity).slice(0, 12), 'Your rarest cards will show up here once you pull some.');
     else if (homeTab === 'fav') body = grid(ents.filter(([, e]) => e.f).sort(rarity), 'No favorites yet. Open a card and press Favorite.');
     else if (homeTab === 'holo') body = grid(ents.filter(([, e]) => e.h > 0).sort(rarity), 'No skibidi cards yet. They are a rare shine on any pull.');
     else {
       const total = ents.reduce((a, [, e]) => a + e.n, 0), top = ents.slice().sort(rarity)[0], most = ents.slice().sort((a, b) => b[1].n - a[1].n)[0];
       const first = ents.length ? new Date(Math.min(...ents.map(([, e]) => e.t))).toLocaleDateString('en-GB') : 'Not yet';
-      const facts = [[S.stats.opened, 'packs opened'], [total, 'cards pulled'], [`${ents.length}/${CARDS.length}`, 'unique cards'], [total - ents.length, 'duplicates'], [ents.filter(([, e]) => e.h > 0).length, 'skibidi cards'],
+      const facts = [[fmt(score()), 'collection score'], [S.stats.opened, 'packs opened'], [total, 'cards pulled'], [`${ents.length}/${CARDS.length}`, 'unique cards'], [total - ents.length, 'duplicates'], [ents.filter(([, e]) => e.h > 0).length, 'skibidi cards'],
         [top ? esc(BYID[top[0]].name) : 'None', 'rarest card'], [most ? `${esc(BYID[most[0]].name)} ×${most[1].n}` : 'None', 'most pulled'], [first, 'playing since']];
       body = `<div class="panel facts">${facts.map(([v, l]) => `<div><b>${v}</b><span>${l}</span></div>`).join('')}</div>
         <div class="panel"><h2>By rarity</h2><div class="tier-prog">${TIERS.map((t, i) => { const l = G.BYTIER[i], g = l.filter((c) => S.cards[c.id]).length; return `<div class="${tcls(t)}"><span>${t}</span><div class="bar"><i style="width:${l.length ? g / l.length * 100 : 0}%"></i></div><b>${g}/${l.length}</b></div>`; }).join('')}</div></div>`;
     }
     return `<div class="tabs" role="tablist">${HOME_TABS.map(([k, l]) => `<button class="btn sm" role="tab" data-act="home-tab" data-tab="${k}" aria-pressed="${homeTab === k}">${l}</button>`).join('')}</div>${body}
-      <p class="muted small hint">Shortcuts: <kbd>O</kbd> open pack · <kbd>A</kbd> open all · <kbd>1</kbd>–<kbd>4</kbd> switch pages · <kbd>/</kbd> search · right-click any card for details</p>`;
+      <p class="muted small hint">Shortcuts: <kbd>O</kbd> open pack · <kbd>A</kbd> open all · <kbd>1</kbd>–<kbd>7</kbd> switch pages · <kbd>/</kbd> search · right-click any card for details</p>`;
   }
   function refreshHomeTabs() { const el = $('#hometabs'); if (el) { el.innerHTML = homeTabsHTML(); $$('.card', el).forEach(tilt); } }
 
   function pageHome() {
     const d = D(), have = owned().length, pct = Math.round(have / CARDS.length * 100);
-    const topRare = CARDS.slice().sort((a, b) => b.ti - a.ti || a.rank - b.rank).slice(0, 8), rareHave = topRare.filter((c) => S.cards[c.id]).length;
-    const last = Object.entries(S.cards).filter(([id]) => BYID[id]).sort((a, b) => b[1].t - a[1].t).slice(0, 6);
-    main().innerHTML = `<section class="hero panel">
+    const topRare = CARDS.filter((c) => !c.monster || S.cards[c.id]).sort((a, b) => b.ti - a.ti || a.rank - b.rank).slice(0, 8), rareHave = topRare.filter((c) => S.cards[c.id]).length;
+        main().innerHTML = `<section class="hero panel">
         
         <div class="hero-text"><p class="eyebrow">Special Strike</p><h1>Pull cards from the Special Strike roster.</h1>
           <p class="muted">${CARDS.length} cards across ${Object.keys(CATS).length} sets. A free pack of ${CARDS_PER_PACK} cards every ${d.interval} minutes, up to ${d.cap} stored.</p>
-          <div class="pack-count" data-packcount aria-live="polite"></div><p class="muted small" data-timer></p></div>
+          <div class="pack-count" data-packcount aria-live="polite"></div></div>
         <div class="hero-pack"><button class="pack" data-act="open-1" data-needpack aria-label="Open a pack"><span class="fan" style="--i:2">${packBag()}</span><span class="fan" style="--i:1">${packBag()}</span>${packBag()}</button>
           <div class="row"><button class="btn primary" data-act="open-1" data-needpack>Open pack</button><button class="btn" data-act="open-all" data-needall hidden>Open all</button></div></div>
-        <div class="hero-side"><div class="stat"><b>${have}</b><span>of ${CARDS.length} cards</span></div><div class="bar"><i style="width:${pct}%"></i></div>
-          <div class="stat"><b>${S.stats.opened}</b><span>packs opened</span></div></div>
+        <div class="hero-side"><div class="ring-wrap" role="timer" aria-label="Time until the next free pack"><svg class="ring" viewBox="0 0 120 120" aria-hidden="true"><circle class="ring-bg" cx="60" cy="60" r="52"/><circle class="ring-fg" data-ring cx="60" cy="60" r="52" transform="rotate(-90 60 60)"/></svg><div class="ring-text"><b data-ringtime>--:--</b><span data-ringlabel>next pack</span></div></div>
+          <div class="stat"><b>${have}</b><span>of ${CARDS.length} cards</span></div><div class="bar"><i style="width:${pct}%"></i></div>
+          <div class="stat"><b>${S.stats.opened}</b><span>packs opened</span></div><div class="stat"><b>${fmt(score())}</b><span>points</span></div></div>
       </section>
       <section><h2>Your cards</h2><div id="hometabs">${homeTabsHTML()}</div></section>
       <section class="rarest"><h2>Rarest cards in the game <span class="muted small">${rareHave}/${topRare.length} found</span></h2><p class="muted small">The hardest pulls available. Grey means you still need it.</p><div class="card-grid small rare-grid">${topRare.map((c) => { const x = S.cards[c.id]; return `<button class="card-btn" data-act="card" data-id="${c.id}">${cardHTML(c, { ghost: !x, holo: x && x.h > 0, count: x && x.n })}</button>`; }).join('')}</div></section>`;
@@ -247,7 +372,7 @@
     main().innerHTML = `<h1>Index</h1><p class="muted">Every card in the game, grouped by set. Greyed-out cards are ones you haven't pulled yet, and they light up the moment you get them. Right-click any card for its rarity and details.</p>` + cats.map((k) => {
       const list = CARDS.filter((c) => c.cat === k).sort((a, b) => b.ti - a.ti || a.name.localeCompare(b.name)), got = list.filter((c) => S.cards[c.id]).length;
       return `<section class="panel set"><div class="set-head"><div><h2>${k}</h2><p class="muted small">${CATS[k].blurb}</p></div><div class="set-prog"><b>${got}/${list.length}</b><div class="bar"><i style="width:${got / list.length * 100}%"></i></div></div></div>
-        <div class="card-grid small idx-grid">${list.map((c) => { const x = S.cards[c.id]; return `<button class="card-btn" data-act="card" data-id="${c.id}">${cardHTML(c, { ghost: !x, holo: x && x.h > 0, count: x && x.n, size: 128 })}</button>`; }).join('')}</div></section>`;
+        <div class="card-grid small idx-grid">${list.map((c) => { const x = S.cards[c.id]; return `<button class="card-btn" data-act="card" data-id="${c.id}">${cardHTML(c, { ghost: !x && !c.monster, locked: !x && c.monster, holo: x && x.h > 0, count: x && x.n, size: 128 })}</button>`; }).join('')}</div></section>`;
     }).join('') + `<section class="panel"><h2>By rarity</h2><div class="tier-prog">${TIERS.map((t, i) => { const l = G.BYTIER[i], g = l.filter((c) => S.cards[c.id]).length; return `<div class="${tcls(t)}"><span>${t}</span><div class="bar"><i style="width:${g / l.length * 100}%"></i></div><b>${g}/${l.length}</b></div>`; }).join('')}</div></section>`;
     $$('.idx-grid .card', main()).forEach(tilt);
   }
@@ -260,16 +385,20 @@
     const row = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
     function show(c, x, y) {
       close();
-      const d = D(), w = weights(d, false), tot = w.reduce((a, b) => a + b, 0), p = w[c.ti] / tot, per = p / G.BYTIER[c.ti].length, perPack = 1 - Math.pow(1 - per, CARDS_PER_PACK), e = S.cards[c.id];
+      const d = D(), w = weights(d, false), tot = w.reduce((a, b) => a + b, 0);
+      const mt = G.MONSTER_POOL.reduce((a, m) => a + G.BASE_WEIGHTS[m.ti], 0);
+      const p = c.monster ? G.MONSTER_CHANCE * G.BASE_WEIGHTS[c.ti] * G.MONSTER_POOL.filter((m) => m.ti === c.ti).length / mt : (w[c.ti] / tot) * (S.settings.monster ? 1 - G.MONSTER_CHANCE : 1);
+      const per = c.monster ? G.MONSTER_CHANCE * G.BASE_WEIGHTS[c.ti] / mt : p / G.POOL[c.ti].length, perPack = 1 - Math.pow(1 - per, CARDS_PER_PACK), e = S.cards[c.id];
       box = document.createElement('div'); box.className = 'ctx'; box.setAttribute('role', 'dialog');
       box.style.setProperty('--tc', `var(--${tcls(c.tier)})`);
-      box.innerHTML = `<h3>${esc(c.name)}</h3><div class="sub">${esc(c.cat)} · Rank #${c.rank}</div><dl>
+      if (c.monster && !e) { box.innerHTML = `<h3>???</h3><div class="sub">${esc(c.cat)} · ${c.tier}</div><dl>${row('Points', c.pts)}${row('Found in', 'Something hungry')}</dl>`; }
+      else box.innerHTML = `<h3>${esc(c.name)}</h3><div class="sub">${esc(c.cat)} · Rank #${c.rank}</div><dl>
         ${row('Rarity', `<span style="color:var(--tc)">${c.tier}</span>`)}
-        ${row('Chance per slot', pct(p))}
+        ${row('Points', c.pts)}
+        ${c.monster ? row('Drops', 'Only with the monster let in') : row('Chance per slot', pct(p))}
         ${row('This exact card', pct(per))}
         ${perPack > 0 ? row('Per pack', `about 1 in ${Math.round(1 / perPack).toLocaleString()}`) : ''}
-        ${row('Skibidi chance', pct(d.holo))}
-        ${typeof c.atk === 'number' ? row('ATK / HP / SPD', `${c.atk} / ${c.hp} / ${c.spd}`) : ''}</dl><hr>
+        ${row('Skibidi chance', pct(d.holo))}</dl><hr>
         <dl>${e ? row('Copies owned', e.n + (e.h ? ` (${e.h} skibidi)` : '')) + row('First pulled', new Date(e.t).toLocaleDateString('en-GB')) : row('Status', 'Not pulled yet')}</dl>`;
       document.body.append(box);
       const r = box.getBoundingClientRect();
@@ -296,7 +425,8 @@
         <label class="check" style="margin-top:14px"><input id="optLeave" type="checkbox" ${S.settings.leaveWarn ? 'checked' : ''}> Warn me before closing the page if my save isn't backed up</label>
         <h3 style="margin:18px 0 8px">Restore a save</h3><textarea id="importText" rows="3" style="width:100%" placeholder="Paste a save code here"></textarea>
         <div class="row wrap" style="margin-top:8px"><button class="btn" data-act="import-save">Import pasted code</button><label class="btn" style="cursor:pointer">Import from file<input id="importFile" type="file" accept=".txt,.json" hidden></label></div></section>
-      <section class="panel"><h2>The Monster 👹</h2><label class="check"><input id="optMonster" type="checkbox" ${S.settings.monster ? 'checked' : ''}> Let the monster in</label><p class="muted small">Each pack you open has a 25% chance that the monster eats one random card from it. Eaten cards are gone for good and never reach your collection.</p></section>
+      <section class="panel"><h2>The Monster 👹</h2><label class="check"><input id="optMonster" type="checkbox" ${S.settings.monster ? 'checked' : ''}> Let the monster in</label><p class="muted small">Each pack you open has a 25% chance that the monster eats one random card from it. Eaten cards are gone for good and never reach your collection. But with the monster in, packs can also contain ${G.MONSTER_POOL.length} special cards that can't be found any other way (about ${Math.round(G.MONSTER_CHANCE * 100)}% per card slot).</p></section>
+      ${net ? net.settingsHTML() : ''}
       <section class="panel"><h2>Save data</h2><p class="muted small">Your progress is stored in this browser. Copy the code to move it to another device, or paste one to restore it.</p>
         <textarea id="saveBox" rows="3" spellcheck="false" aria-label="Save code" placeholder="Save code"></textarea>
         <div class="row wrap"><button class="btn" data-act="export">Show my save code</button><button class="btn" data-act="copy-save">Copy</button><button class="btn" data-act="import">Load this code</button></div></section>
@@ -306,6 +436,7 @@
     $('#optMotion').onchange = (e) => { S.settings.motion = e.target.checked; save(); };
     $('#optLeave').onchange = (e) => { S.settings.leaveWarn = e.target.checked; save(); };
     $('#importFile').onchange = async (e) => { const f = e.target.files[0]; if (f) importSave(await f.text()); };
+    if (net) net.bindSettings();
     $('#optMonster').onchange = (e) => { S.settings.monster = e.target.checked; save(); toast(e.target.checked ? 'The monster is hungry...' : 'The monster went back to sleep'); };
   }
   function applyAudio() { configureAudio({ sound: S.settings.sound, volume: S.settings.volume }); }
@@ -315,10 +446,10 @@
     const c = BYID[id], e = S.cards[id];
     const bg = modal(`<div class="detail">${cardHTML(c, { locked: !e, holo: e && e.h > 0, count: e && e.n, fav: e && e.f, size: 250 })}
       <div class="detail-info"><p class="eyebrow">${c.cat} · Rank #${c.rank}</p><h2>${e ? esc(c.name) : 'Not found yet'}</h2>
-        <p class="tier-line ${tcls(c.tier)}"><span class="tier-text">${c.tier}</span></p>
+        <p class="tier-line ${tcls(c.tier)}"><span class="tier-text">${c.tier}</span> <span class="muted small">· ${c.pts} points</span></p>
         ${e ? `<p class="muted small">You own ${e.n} cop${e.n === 1 ? 'y' : 'ies'}${e.h ? `, ${e.h} skibidi` : ''}.</p>
         <div class="row wrap"><button class="btn" data-act="fav" data-id="${id}">${e.f ? '★ Unfavorite' : '☆ Favorite'}</button></div>`
-        : `<p class="muted">${c.tier} card from the ${c.cat} set. Keep opening packs.</p>`}
+        : `<p class="muted">${c.monster ? `${c.tier} card. Something hungry guards this one.` : `${c.tier} card from the ${c.cat} set. Keep opening packs.`}</p>`}
       </div></div>`, 'wide');
     $$('.card', bg).forEach(tilt);
   }
@@ -372,7 +503,7 @@
       if (single) {
         const cs = results[0].slice().sort((a, b) => a.card.ti - b.card.ti);
         const row = document.createElement('div'); row.className = 'reveal-row';
-        row.innerHTML = cs.map((o, i) => `<div class="slot ${o.eaten ? 'eaten' : tcls(o.card.tier)}" data-i="${i}"><div class="flipper"><div class="face back"><div class="card-back">${BOLT}</div></div><div class="face front">${o.eaten ? MONSTER : cardHTML(o.card, { holo: o.holo, isNew: o.isNew })}</div></div><div class="reveal-label"></div></div>`).join('');
+        row.innerHTML = cs.map((o, i) => `<div class="slot ${o.eaten ? 'eaten' : tcls(o.card.tier)}" data-i="${i}"><div class="flipper"><div class="face back"><div class="card-back">${BOLT}</div></div><div class="face front">${o.eaten ? MONSTER : cardHTML(o.card, { holo: o.holo })}</div></div><div class="reveal-label"></div></div>`).join('');
         ov.append(row);
         for (let i = 0; i < cs.length && !skipped; i++) {
           const o = cs[i], c = o.card, slot = $(`.slot[data-i="${i}"]`, row);
@@ -382,7 +513,7 @@
           if (c.ti >= 4) await specialReveal(ov, o, fx, () => skipped);
           SFX.flip(); $('.flipper', slot).classList.add('flipped'); slot.classList.add('revealed'); SFX.reveal(c.ti);
           if (o.holo) { setTimeout(() => SFX.holo(), 150); fx.burst(RAINBOW, 80, true); } else if (c.ti >= 3) fx.burst([TC[c.tier], '#fff'], 30 + c.ti * 16);
-          $('.reveal-label', slot).innerHTML = `<span class="tier-text ${tcls(c.tier)}">${c.tier}</span>${o.holo ? ' <span class="holo-badge static">SKIBIDI</span>' : ''}`;
+          $('.reveal-label', slot).innerHTML = `<span class="tier-text ${tcls(c.tier)}">${c.tier}</span>${o.holo ? ' <span class="holo-badge static">SKIBIDI</span>' : ''}${newLabel(o.isNew)}${o.monsterDrop ? '<span class="monster-drop">👹 Monster drop</span>' : ''}`;
           say(`Card ${i + 1}: ${c.name}, ${c.tier}${o.holo ? ', skibidi' : ''}${o.isNew ? ', new' : ''}`);
           await wait(c.ti >= 4 ? 900 : 430);
         }
@@ -401,7 +532,7 @@
       sum.innerHTML = `<h2>${single ? 'Pack opened' : `Opened ${n} packs`}</h2><p class="muted">Best pull: <b class="tier-text ${tcls(best.card.tier)}">${best.card.tier}</b> ${esc(best.card.name)} (${best.card.cat})</p>
         <p class="pack-new ${fresh ? '' : 'none'}">${fresh ? `✦ ${fresh} new for your collection` : 'No new cards this time.'}${results.some((r) => r.some((o) => o.pity)) ? ' · Pity pull triggered' : ''}</p>
         <p class="row counts">${counts.map(([t, k]) => `<span class="${tcls(t)}"><span class="tier-text">${t}</span> ×${k}</span>`).join('')}${holos ? `<span class="holo-badge static">✦ SKIBIDI ×${holos}</span>` : ''}</p>
-        <div class="card-grid summary-grid">${shown.map((o, i) => `<button class="card-btn" data-i="${i}">${cardHTML(o.card, { holo: o.holo, isNew: o.isNew })}</button>`).join('')}</div>
+        <div class="card-grid summary-grid">${shown.map((o, i) => `<button class="card-btn" data-i="${i}">${cardHTML(o.card, { holo: o.holo })}${newLabel(o.isNew)}</button>`).join('')}</div>
         ${all.length > shown.length ? `<p class="muted small">Showing the best ${shown.length} of ${all.length} cards. All are saved to your collection.</p>` : ''}
         <div class="row center">${S.packs >= 1 ? `<button class="btn primary" id="again">Open another (${S.packs} left)</button>` : ''}${S.packs >= 2 ? `<button class="btn" id="againAll">Open all (${S.packs})</button>` : ''}<a class="btn" href="#collection" id="toCol">View collection</a><button class="btn" id="done">Continue</button></div>`;
       ov.append(sum); if (eatenAll.length) sum.insertAdjacentHTML('afterbegin', `<p class="monster-note">👹 The monster ate ${eatenAll.map((o) => '<b>' + esc(o.card.name) + '</b>').join(', ')}</p>`); $$('.card', sum).forEach((el, i) => { el.style.animationDelay = Math.min(i * 30, 900) + 'ms'; tilt(el); });
@@ -438,12 +569,14 @@
       case 'card': SFX.click(); cardModal(id); break;
       case 'home-tab': homeTab = t.dataset.tab; refreshHomeTabs(); break;
       case 'copy-save': copySave(); break;
+      case 'redeem': redeemModal(); break;
+      case 'edit-profile': editProfile(); break;
       case 'download-save': downloadSave(); break;
       case 'import-save': importSave(($('#importText') || {}).value || ''); break;
       case 'fav': { const x = S.cards[id]; if (x) { x.f = x.f ? 0 : 1; save(); closeModal(); cardModal(id); route(); } break; }
       case 'export': try { $('#saveBox').value = btoa(unescape(encodeURIComponent(JSON.stringify(S)))); } catch (er) { toast('Could not make a save code', true); } break;
       case 'copy-save': { const b = $('#saveBox'); if (!b.value) $('[data-act="export"]').click(); b.select(); try { await navigator.clipboard.writeText(b.value); toast('Save code copied'); } catch (er) { document.execCommand && document.execCommand('copy'); toast('Select and copy the code'); } break; }
-      case 'import': try { const j = JSON.parse(decodeURIComponent(escape(atob($('#saveBox').value.trim())))); if (!j || !j.cards) throw 0; S = Object.assign(fresh(), j); save(); renderHeader(); toast('Save loaded'); pageSettings(); } catch (er) { toast('That is not a valid save code', true); } break;
+      case 'import': try { const j = JSON.parse(decodeURIComponent(escape(atob($('#saveBox').value.trim())))); if (!j || !j.cards) throw 0; S = normalize(j); save(); renderHeader(); toast('Save loaded'); pageSettings(); } catch (er) { toast('That is not a valid save code', true); } break;
       case 'reset': if (!t.dataset.sure) { t.dataset.sure = 1; t.textContent = 'Press again to erase everything'; setTimeout(() => { if (t.isConnected) { delete t.dataset.sure; t.textContent = 'Reset everything'; } }, 4000); break; }
         S = fresh(); save(); renderHeader(); route(); toast('Save reset'); break;
     }
@@ -491,9 +624,9 @@
     setTimeout(() => { if (!$('.backup')) modal('<div class="backup"><h2>Back up your save first</h2><p class="muted">Your cards are stored only in this browser. Copy your save so you can restore it if it is ever lost.</p><div class="row wrap"><button class="btn primary" data-act="copy-save">Copy save</button><button class="btn" data-act="download-save">Download save</button></div></div>'); }, 300);
   });
 
-  const PAGES = { home: pageHome, collection: pageCollection, index: pageIndex, options: pageSettings };
+  const PAGES = { home: pageHome, collection: pageCollection, index: pageIndex, players: () => net.pagePlayers(), trades: () => net.pageTrades(), profile: pageProfile, options: pageSettings };
   function route() {
-    const h = (location.hash.slice(1) || 'home'), fn = PAGES[h] || pageHome;
+    const h = (location.hash.slice(1) || 'home'), fn = h.indexOf('user-') === 0 ? () => net.pageUser(h.slice(5)) : (PAGES[h] || pageHome);
     renderHeader(); fn(); updateHud();
     document.title = 'Special Strike Gacha';
   }
@@ -501,6 +634,8 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden) updateHud(); });
   setInterval(updateHud, 1000);
   applyAudio();
-  tick(); route();
-  window.__ssg = { get S() { return S; }, save, route };
+  net = window.SSGNet({ G, S: () => S, save, toast, modal, closeModal, esc, $, $$, cardHTML, tilt, avatarHTML, bannerCSS, profileHTML, route, renderHeader, fmt, uid, normalize, hasCopy, takeCopy, addCopy, busy: () => opening,
+    restore: (j) => { allowLeave = true; S = normalize(j); save(); location.reload(); } });
+  tick(); route(); net.start();
+  window.__ssg = { get S() { return S; }, save, route, net };
 })();
