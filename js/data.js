@@ -82,6 +82,7 @@ EXTRA
 SSO Chief Mythic
 Good Chief Mythic
 SS3 RXQ Mythic
+Shark Puppet Mythic
 Split Sparky Doo Sigma
 The Shed Sigma
 Fazgirl Sigma
