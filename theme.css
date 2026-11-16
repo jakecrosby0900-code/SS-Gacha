@@ -1,0 +1,136 @@
+/* Design overhaul: loads after style.css and overrides it. */
+:root{--bg:#0b0a14;--bg2:#12101f;--panel:#16142a;--panel2:#1e1b38;--line:#2c2850;--text:#f1eefc;--muted:#a29fc4;--accent:#ff9f5a;--accent2:#7c6cff;--accent-ink:#1c0d00;--radius:18px}
+body{background:radial-gradient(60% 45% at 15% -5%,rgba(124,108,255,.28),transparent 65%),radial-gradient(50% 40% at 90% 0,rgba(74,222,128,.15),transparent 60%),var(--bg);background-attachment:fixed}
+main{max-width:1180px;margin:0 auto;padding:28px 20px 60px}
+.top{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:18px;padding:12px 22px;background:rgba(11,10,20,.72);backdrop-filter:blur(16px);border-bottom:1px solid var(--line)}
+.logo{font-size:1.15rem}.logo svg{filter:drop-shadow(0 0 8px var(--accent))}
+nav.main{display:flex;gap:4px;flex-wrap:wrap}
+nav.main a{padding:7px 14px;border-radius:999px;color:var(--muted);text-decoration:none;font-weight:600;transition:.2s}
+nav.main a:hover{color:#fff;background:var(--panel2)}
+nav.main a[aria-current]{color:#fff;background:linear-gradient(135deg,#9b6dff,#6d3be0);box-shadow:0 4px 16px rgba(139,92,246,.45)}
+.panel{background:linear-gradient(160deg,rgba(30,27,56,.85),rgba(18,16,36,.9));border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 12px 40px rgba(0,0,0,.35)}
+.hero{background:radial-gradient(ellipse 45% 90% at 50% 55%,rgba(139,92,246,.28),transparent 70%),linear-gradient(160deg,#211d44,#14122a)}
+.hero::before,.hero::after{display:none}.hud,.rec{display:none!important}
+h1{font-size:clamp(1.8rem,4vw,2.6rem);background:linear-gradient(90deg,#fff,#cfc8ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+.btn{border-radius:999px;background:var(--panel2);border-color:var(--line);transition:.2s}
+.btn:hover:not(:disabled){transform:translateY(-1px);background:#29254d}
+.btn.primary{background:linear-gradient(135deg,#7bf5ab,#22c55e);color:var(--accent-ink);box-shadow:0 8px 24px rgba(34,197,94,.35)}
+.chip{background:var(--panel2);border-color:var(--line)}
+.art{position:relative}.art .art-img{position:absolute;inset:0}
+.filters{display:flex;flex-wrap:wrap;gap:12px}
+input,select,textarea{background:#0f0d20;border:1px solid var(--line);color:var(--text);border-radius:12px;padding:9px 12px}
+footer.site{color:var(--muted);text-align:center;padding:30px 20px;font-size:.85rem}
+@media(max-width:720px){.top{flex-wrap:wrap;gap:8px}.hero{grid-template-columns:1fr}.hero-side{border:0;padding:0}}
+
+/* 3D cards: tilt, depth, glare, dynamic shadow */
+.card-btn{perspective:none}
+.card{--px:0;--py:0;--sx:0px;--sy:6px;--s:1;transform:perspective(650px) rotateX(var(--rx)) rotateY(var(--ry)) scale(var(--s));transition:transform .6s cubic-bezier(.2,.9,.2,1),box-shadow .4s;box-shadow:0 8px 22px rgba(0,0,0,.5),0 0 16px color-mix(in srgb,var(--tc) 25%,transparent)}
+.card.tilting{--s:1.08;transition:transform .09s ease-out,box-shadow .3s;box-shadow:var(--sx) var(--sy) 34px rgba(0,0,0,.6),0 0 30px color-mix(in srgb,var(--tc) 60%,transparent);}
+.card::after{content:"";position:absolute;inset:0;pointer-events:none;z-index:6;opacity:0;transition:opacity .3s;background:radial-gradient(circle at var(--mx) var(--my),rgba(255,255,255,.42),transparent 55%);mix-blend-mode:soft-light}
+.card.tilting::after{opacity:1}
+/* polish */
+html{scroll-behavior:smooth}::selection{background:var(--accent2);color:#fff}
+*{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:10px}
+.btn:active:not(:disabled){transform:scale(.96)}
+main>*{animation:rise .45s cubic-bezier(.2,.9,.2,1) backwards}main>*:nth-child(2){animation-delay:.06s}main>*:nth-child(3){animation-delay:.12s}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* LAYERING: one clear stacking order */
+main{position:relative;z-index:1;isolation:isolate}      /* nothing inside the page can ever escape above the header or overlays */
+header.top{z-index:50}
+.card{isolation:isolate}
+.card .art{position:relative;z-index:1;overflow:hidden}
+.card .art>*{transition:transform .5s cubic-bezier(.2,.9,.2,1)}
+.card .art-img{z-index:0}
+.card .card-top,.card .card-body{position:relative;z-index:3;transition:transform .5s cubic-bezier(.2,.9,.2,1)}
+.card .foil,.card .glare{z-index:4}
+.card .copies,.card .holo-badge,.card .new-tag,.card .fav{z-index:5}
+.card::after{z-index:6}
+/* parallax moves only the picture inside its frame, so text always stays on top */
+.card.tilting .art>*{transform:translate(calc(var(--px)*-7px),calc(var(--py)*-7px)) scale(1.14);transition:transform .09s}
+.card.tilting .card-top,.card.tilting .card-body{transform:translate(calc(var(--px)*4px),calc(var(--py)*4px));transition:transform .09s}
+.card-grid{padding:10px 4px}
+.card-btn{position:relative;border-radius:14px}.card-btn:hover{z-index:2}
+/* cleaner overall look */
+.panel{padding:clamp(18px,3vw,30px)}
+section.panel+section.panel,main>section+section{margin-top:22px}
+h2{font-size:1.25rem;margin:0 0 14px;letter-spacing:.01em}
+.hero{padding:clamp(24px,4vw,44px)}
+.hero-pack .pack{transition:transform .35s cubic-bezier(.2,.9,.2,1)}.hero-pack .pack:hover{transform:translateY(-8px) rotate(-2deg)}
+.bar{height:10px;border-radius:99px;background:#0f0d20;overflow:hidden}.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent2),var(--accent));border-radius:99px}
+.modal-bg,.opening{backdrop-filter:blur(8px)}
+.modal{border-radius:22px}
+
+/* home pack: keep the fanned pack behind and clear of the buttons */
+.hero-pack{gap:38px;padding-bottom:6px}
+.hero-pack .pack{position:relative;z-index:1;margin-bottom:10px}
+.hero-pack>*:not(.pack){position:relative;z-index:2}
+
+/* ===== purple + green scheme ===== */
+header.top{background:rgba(10,7,20,.8);border-bottom:1px solid var(--line)}
+.card{background:#0f0a1d}.bar i{background:linear-gradient(90deg,#8b5cf6,#4ade80)}
+.hero{background:radial-gradient(ellipse 45% 90% at 50% 55%,rgba(139,92,246,.3),transparent 70%),radial-gradient(ellipse 30% 60% at 85% 100%,rgba(74,222,128,.14),transparent 70%),linear-gradient(160deg,#221a4a,#120d26)}
+.bag-top,.bag-body{background:linear-gradient(160deg,#a47bff,#5b2fd0 52%,#16a34a)}
+.bag-top{background-image:repeating-linear-gradient(90deg,rgba(0,0,0,.25) 0 2px,transparent 2px 6px),linear-gradient(160deg,#b794ff,#6d3be0)}
+.pack-face svg{color:#eafff1}.glints i{background:#d9ffe8}
+/* ===== pack opening ===== */
+.opening{background:radial-gradient(ellipse at 50% 42%,#2b1760 0,#0d0720 55%,#04020a 100%)}
+.opening::before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(circle at 50% 45%,rgba(74,222,128,.2),transparent 45%);animation:breathe 3.2s ease-in-out infinite}
+@keyframes breathe{50%{opacity:.45;transform:scale(1.15)}}
+.opening.shake3 .stage-pack{filter:drop-shadow(0 0 34px #4ade80)}
+.opening.shake3 .stage-pack{filter:drop-shadow(0 0 34px #4ade80)!important}
+.ripple{border-color:#b9ffd0}
+.stage-pack{position:relative}
+.stage-pack.torn::before{content:"";position:absolute;left:50%;top:32%;width:70vmin;height:70vmin;margin:-35vmin 0 0 -35vmin;border-radius:50%;pointer-events:none;background:radial-gradient(circle,#fff 0,rgba(120,245,170,.85) 16%,rgba(139,92,246,.55) 40%,transparent 68%);animation:burst .95s ease-out forwards}
+@keyframes burst{from{transform:scale(.1);opacity:1}to{transform:scale(1.7);opacity:0}}
+.reveal-row .slot{animation:slotin .6s cubic-bezier(.2,1.4,.4,1) backwards}
+@keyframes slotin{from{opacity:0;transform:translateY(110px) scale(.35) rotate(-9deg)}}
+.reveal-row .slot:nth-child(1){animation-delay:0.15s}.reveal-row .slot:nth-child(2){animation-delay:0.22s}.reveal-row .slot:nth-child(3){animation-delay:0.29s}.reveal-row .slot:nth-child(4){animation-delay:0.36s}.reveal-row .slot:nth-child(5){animation-delay:0.43s}.reveal-row .slot:nth-child(6){animation-delay:0.50s}.reveal-row .slot:nth-child(7){animation-delay:0.57s}.reveal-row .slot:nth-child(8){animation-delay:0.64s}.reveal-row .slot:nth-child(9){animation-delay:0.71s}.reveal-row .slot:nth-child(10){animation-delay:0.78s}.reveal-row .slot:nth-child(11){animation-delay:0.85s}.reveal-row .slot:nth-child(12){animation-delay:0.92s}
+.card-back{border-color:#5b3fb0;background:repeating-linear-gradient(45deg,#1b1240 0 10px,#130c2c 10px 20px);color:#8a6cf0;box-shadow:0 0 22px rgba(139,92,246,.4)}
+.slot.revealed .flipper{animation:landpop .5s cubic-bezier(.2,1.5,.4,1)}
+@keyframes landpop{0%{translate:0 0;scale:1}40%{translate:0 -14px;scale:1.1}100%{translate:0 0;scale:1}}
+.special{background:rgba(8,4,22,.84);backdrop-filter:blur(6px)}
+.summary-grid .card{animation-duration:.5s}
+
+/* index: ghost cards light up once owned */
+.card.ghost{filter:grayscale(1) brightness(.5) contrast(.9);opacity:.8;box-shadow:none;transition:filter .5s,opacity .5s,transform .6s cubic-bezier(.2,.9,.2,1)}
+.card.ghost.tilting{filter:grayscale(1) brightness(.75);opacity:1}
+.card.ghost .foil,.card.ghost::after{display:none}
+.idx-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:18px 14px}
+.idx-grid .card-btn .card:not(.ghost){filter:drop-shadow(0 0 10px color-mix(in srgb,var(--tc) 45%,transparent))}
+/* right-click info */
+.ctx{position:fixed;z-index:300;width:min(290px,92vw);padding:16px 18px;border-radius:16px;background:rgba(21,15,38,.97);border:1px solid var(--tc,var(--line));backdrop-filter:blur(12px);box-shadow:0 18px 50px rgba(0,0,0,.6),0 0 26px color-mix(in srgb,var(--tc,#8b5cf6) 35%,transparent);animation:ctxin .14s ease-out}
+@keyframes ctxin{from{opacity:0;transform:scale(.94) translateY(4px)}}
+.ctx h3{margin:0;font:700 1.15rem var(--display);color:var(--tc)}.ctx .sub{color:var(--muted);font-size:.8rem;margin-top:2px}
+.ctx dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:12px 0 0;font-size:.88rem}.ctx dt{color:var(--muted)}.ctx dd{margin:0;text-align:right;font-weight:600}
+.ctx hr{border:0;border-top:1px solid var(--line);margin:12px 0 0}
+
+/* home tabs */
+.tabs{display:flex;gap:8px;margin:0 0 18px;flex-wrap:wrap}
+.tabs .btn[aria-pressed=true]{background:linear-gradient(135deg,#9b6dff,#6d3be0);border-color:transparent;color:#fff;box-shadow:0 4px 16px rgba(139,92,246,.4)}
+#hometabs .facts{margin-bottom:18px}
+#hometabs .card-grid.small{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:18px 14px}
+.hint{margin-top:22px;text-align:center}
+kbd{display:inline-block;min-width:1.6em;padding:1px 7px;border-radius:7px;border:1px solid var(--line);border-bottom-width:2px;background:var(--panel2);font:600 .85em var(--display);color:var(--text);text-align:center}
+
+/* rarest cards section + monster */
+.rarest{margin:26px 0}.rarest h2 span{font-weight:500;margin-left:8px}
+.rare-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:18px 14px;margin-top:14px}
+.rare-grid .card-btn .card:not(.ghost){filter:drop-shadow(0 0 12px color-mix(in srgb,var(--tc) 55%,transparent))}
+.monster-card{width:100%;height:100%;border-radius:12px;border:3px solid #4ade80;display:grid;place-items:center;align-content:center;gap:4px;background:radial-gradient(circle at 50% 35%,#34187a,#0d0720);box-shadow:0 0 30px rgba(74,222,128,.55);color:#4ade80;font:700 .95rem var(--display);letter-spacing:.2em}
+.monster-card svg{width:78%;animation:chomp .45s ease-in-out 3}
+@keyframes chomp{50%{transform:scale(1.12) rotate(-3deg)}}
+.slot.eaten .reveal-label{color:#ff7a90}.monster-line b{color:#fff}
+.monster-note{margin:0 0 14px;padding:10px 16px;border-radius:14px;background:rgba(255,77,109,.12);border:1px solid rgba(255,77,109,.4);color:#ffb3c0;display:inline-block}
+
+/* FIX: a CSS filter on the flipper flattens its 3D, so epic+ cards stayed face-down after the shake.
+   Put the rarity glow on the outer slot instead and keep the flipper filter-free. */
+.slot.revealed .flipper{filter:none!important}
+.slot.revealed.t-epic{filter:drop-shadow(0 0 16px var(--t-epic))}
+.slot.revealed.t-legendary{filter:drop-shadow(0 0 20px var(--t-legendary))}
+.slot.revealed.t-mythic{filter:drop-shadow(0 0 24px var(--t-mythic))}
+.slot.revealed.t-sigma{filter:drop-shadow(0 0 28px #fff)}
+.flipper{transform-style:preserve-3d;-webkit-transform-style:preserve-3d}
+.flipper.flipped{transform:rotateY(180deg)}
