@@ -1,1 +1,18 @@
-{"updated":0,"players":[]}
+{
+ "updated": 1794933467137,
+ "players": [
+  {
+   "id": "mwkx16ga7k0aur",
+   "name": "Player",
+   "hue": 28,
+   "pfp": null,
+   "joined": 1794933450730,
+   "seen": 1794933451815,
+   "opened": 0,
+   "score": 0,
+   "unique": 0,
+   "skibidi": 0,
+   "rarest": null
+  }
+ ]
+}
