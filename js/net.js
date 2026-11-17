@@ -37,7 +37,9 @@
       const c = conf(), headers = { Accept: 'application/vnd.github+json' };
       if (c.token) headers.Authorization = 'Bearer ' + c.token;
       if (body) headers['Content-Type'] = 'application/json';
-      const r = await fetch(c.api + path, { method, headers, body: body ? JSON.stringify(body) : undefined, cache: 'no-store', keepalive: !!keep });
+      const ac = new AbortController(), to = setTimeout(() => ac.abort(), 20000); let r;
+      try { r = await fetch(c.api + path, { method, headers, body: body ? JSON.stringify(body) : undefined, cache: 'no-store', keepalive: !!keep, signal: ac.signal }); }
+      catch (e) { throw new Error(e.name === 'AbortError' ? 'GitHub did not answer in time' : 'Network error: ' + e.message); } finally { clearTimeout(to); }
       if (!r.ok) {
         const e = new Error(r.status === 401 ? 'Token rejected (401)' : r.status === 403 || r.status === 429 ? 'GitHub rate limit or permission problem (' + r.status + ')' : r.status === 404 ? 'Repo or issue not found (404). Check the repo name and token access.' : 'GitHub error ' + r.status);
         e.status = r.status; throw e;
@@ -180,11 +182,23 @@
     async function diag() {
       const c = conf(), s = S();
       if (!c.repo || !c.token) return 'Not connected: no GitHub repo/token configured (repo "' + (c.repo || 'none') + '").';
-      await cycle(true);
-      if (net.status !== 'ok') return 'Sync FAILED: ' + net.msg;
-      const mine = net.dir.find(isMe), local = Object.keys(s.cards).filter((id) => s.cards[id].n > 0).length;
-      if (!mine) return 'Connected to ' + c.repo + ' but your save is NOT online yet (no player entry found for id ' + s.profile.id + '). Press the button again in a few seconds.';
-      return 'Saved online (' + c.repo + ', issue #' + mine.num + '): ' + mine.unique + ' cards online, ' + local + ' on this device.';
+      for (let i = 0; i < 50 && net.busy; i++) await new Promise((r) => setTimeout(r, 300));
+      if (net.busy) return 'A sync has been stuck for 15 seconds (GitHub is not answering). Reload the page and try again.';
+      net.busy = true; let out = '';
+      try {
+        await refresh();
+        if (net.cfg.blocked.some((x) => x.id === s.profile.id)) return 'Your player (id ' + s.profile.id + ') is on the admin\'s removed list, so it is never uploaded or shown.';
+        net.createdAt = 0; net.lastKey = '';
+        const before = net.dir.find(isMe);
+        await publish(true);
+        await refresh();
+        const mine = net.dir.find(isMe), local = Object.keys(s.cards).filter((id) => s.cards[id].n > 0).length;
+        if (mine) return 'Saved online (' + c.repo + ', issue #' + mine.num + '): ' + mine.unique + ' cards online, ' + local + ' on this device.';
+        out = 'Upload ran (' + (before ? 'updated' : 'created') + ' issue #' + (net.myNum || '?') + ') but the leaderboard cannot read it back.';
+        if (net.myNum) { const cur = await gh('GET', '/repos/' + c.repo + '/issues/' + net.myNum); out += ' Issue state: ' + cur.state + ', body ' + (cur.body || '').length + ' chars.'; try { out += cleanPlayer(JSON.parse(cur.body), cur.number) ? ' Body is valid.' : ' Body was rejected as invalid.'; } catch (e) { out += ' Body is not valid JSON (probably cut off).'; } }
+        return out;
+      } catch (e) { return 'Upload FAILED: ' + (e.message || e) + (e.status ? ' [HTTP ' + e.status + ']' : ''); }
+      finally { net.busy = false; paint(); }
     }
     // If another device uploaded a newer save than the one this device last synced, bring it in (merging when this device also has new changes) before uploading.
     function reconcile() {
