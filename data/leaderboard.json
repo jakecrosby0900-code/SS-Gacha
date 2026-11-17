@@ -1,19 +1,6 @@
 {
- "updated": 1794949146081,
+ "updated": 1794949213120,
  "players": [
-  {
-   "id": "mwjvvhk77bm0c3",
-   "name": "big m on duh fone",
-   "hue": 28,
-   "pfp": null,
-   "joined": 1794866454265,
-   "seen": 1794948419218,
-   "opened": 75,
-   "score": 798,
-   "unique": 54,
-   "skibidi": 4,
-   "rarest": "Redacted"
-  },
   {
    "id": "mwkjswb13oaas3",
    "name": "Player",
@@ -106,6 +93,19 @@
    "rarest": "Bon"
   },
   {
+   "id": "mwl6d0nyb6w3i0",
+   "name": "jakecrosby",
+   "hue": 28,
+   "pfp": null,
+   "joined": 1794949119646,
+   "seen": 1794949204675,
+   "opened": 10,
+   "score": 133,
+   "unique": 33,
+   "skibidi": 1,
+   "rarest": "Bon"
+  },
+  {
    "id": "mwkxbdkqag3okl",
    "name": "Player",
    "hue": 28,
@@ -151,19 +151,6 @@
    "pfp": null,
    "joined": 1794933859960,
    "seen": 1794933861085,
-   "opened": 0,
-   "score": 0,
-   "unique": 0,
-   "skibidi": 0,
-   "rarest": null
-  },
-  {
-   "id": "mwl6d0nyb6w3i0",
-   "name": "jakecrosby",
-   "hue": 28,
-   "pfp": null,
-   "joined": 1794949119646,
-   "seen": 1794949134674,
    "opened": 0,
    "score": 0,
    "unique": 0,
