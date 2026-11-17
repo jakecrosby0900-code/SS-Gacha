@@ -49,7 +49,8 @@
       const S = ctx.S();
       // Someone who already played before accounts existed keeps their progress. A second person on the same device starts fresh.
       let pid = S.account ? ctx.uid().replace(/[^a-z0-9]/g, '') : S.profile.id;
-      if (net.state.accounts.some((a) => a.pid === pid)) pid = ctx.uid().replace(/[^a-z0-9]/g, '');
+      // A player ID that is taken by another account, or that the admin removed earlier (for example a deleted account on this device), can not be reused.
+      if (net.state.accounts.some((a) => a.pid === pid) || net.state.cfg.blocked.some((x) => x.id === pid)) pid = ctx.uid().replace(/[^a-z0-9]/g, '');
       const salt = b64e(crypto.getRandomValues(new Uint8Array(16))), hash = await derive(pw, salt, ITER);
       let num;
       try { num = await net.createIssue('account:' + k, { t: 'account', v: 1, u: u, k: k, salt: salt, iter: ITER, hash: hash, pid: pid, created: Date.now() }); }

@@ -187,7 +187,7 @@
       net.busy = true; let out = '';
       try {
         await refresh();
-        if (net.cfg.blocked.some((x) => x.id === s.profile.id)) return 'Your player (id ' + s.profile.id + ') is on the admin\'s removed list, so it is never uploaded or shown.';
+        if (net.cfg.blocked.some((x) => x.id === s.profile.id)) return 'Your player (id ' + s.profile.id + ') is on the admin\'s removed list (Admin page > Removed players), so it is never uploaded or shown. Press Restore there, then press this button again.';
         net.createdAt = 0; net.lastKey = '';
         const before = net.dir.find(isMe);
         await publish(true);
