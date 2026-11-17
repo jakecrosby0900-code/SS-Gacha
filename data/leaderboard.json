@@ -1,5 +1,5 @@
 {
- "updated": 1794941320103,
+ "updated": 1794941440332,
  "players": [
   {
    "id": "mwjvvhk77bm0c3",
@@ -7,12 +7,38 @@
    "hue": 28,
    "pfp": null,
    "joined": 1794866454265,
-   "seen": 1794934857788,
+   "seen": 1794941380203,
    "opened": 54,
    "score": 657,
    "unique": 51,
    "skibidi": 3,
    "rarest": "Redacted"
+  },
+  {
+   "id": "mwl1q0jz4o700f",
+   "name": "jaspag",
+   "hue": 28,
+   "pfp": null,
+   "joined": 1794941327951,
+   "seen": 1794941434160,
+   "opened": 23,
+   "score": 310,
+   "unique": 42,
+   "skibidi": 0,
+   "rarest": "The Chud"
+  },
+  {
+   "id": "mwl1p42o18racq",
+   "name": "Player",
+   "hue": 28,
+   "pfp": null,
+   "joined": 1794941285856,
+   "seen": 1794941320838,
+   "opened": 10,
+   "score": 197,
+   "unique": 26,
+   "skibidi": 1,
+   "rarest": "Shadowtrap"
   },
   {
    "id": "mwl1l0qhia3gyr",
@@ -99,19 +125,6 @@
    "pfp": null,
    "joined": 1794933859960,
    "seen": 1794933861085,
-   "opened": 0,
-   "score": 0,
-   "unique": 0,
-   "skibidi": 0,
-   "rarest": null
-  },
-  {
-   "id": "mwl1p42o18racq",
-   "name": "Player",
-   "hue": 28,
-   "pfp": null,
-   "joined": 1794941285856,
-   "seen": 1794941308907,
    "opened": 0,
    "score": 0,
    "unique": 0,
