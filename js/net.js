@@ -13,7 +13,7 @@
     const G = ctx.G, BYID = G.BYID, CARDS = G.CARDS, esc = ctx.esc, $ = ctx.$, $$ = ctx.$$;
     const S = () => ctx.S();
     const LS = 'ss-gacha-net', EVERY = 60000, ONLINE_MS = 150000, BEAT_MS = 240000, MAX_BODY = 64000;
-    const net = { dir: [], trades: [], accounts: [], cfg: G.cleanConfig(null), cfgNum: 0, imgNum: {}, cfgKey: '', status: 'off', msg: '', last: 0, busy: false, lastKey: '', lastBeat: 0, createdAt: 0, loaded: false, cfgChanged: false };
+    const net = { dir: [], trades: [], accounts: [], grants: [], cfg: G.cleanConfig(null), cfgNum: 0, imgNum: {}, cfgKey: '', status: 'off', msg: '', last: 0, busy: false, lastKey: '', lastBeat: 0, createdAt: 0, loaded: false, cfgChanged: false };
     const CFG_CACHE = 'ss-gacha-cfg';
     const view = { by: 'score', q: '' };
     const okImg = (v) => (typeof v === 'string' && /^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(v) && v.length < 200000 ? v : null);
@@ -91,18 +91,23 @@
       const parsed = [];
       all.forEach((i) => { let b; try { b = JSON.parse(i.body); } catch (e) { return; } if (b && typeof b === 'object') parsed.push({ i: i, b: b }); });
       // 1) admin config, card pictures and accounts first, so custom cards exist before players are read
-      let cfgIssue = null; const imgs = {}, imgNum = {}, accounts = {};
+      let cfgIssue = null; const imgs = {}, imgNum = {}, accounts = {}, grants = [];
       parsed.forEach((x) => {
         const b = x.b, num = x.i.number;
         if (b.t === 'config') { if (!cfgIssue || num < cfgIssue.num) cfgIssue = { num: num, b: b }; }
         else if (b.t === 'cardimg' && typeof b.id === 'string') { const im = okImg(b.img); if (im && (imgNum[b.id] == null || num < imgNum[b.id])) { imgs[b.id] = im; imgNum[b.id] = num; } }
+        else if (b.t === 'grant' && typeof b.gid === 'string' && /^[a-z0-9]{6,40}$/.test(b.gid) && typeof b.k === 'string') {
+          const cs = Array.isArray(b.cards) ? b.cards.slice(0, 60).map((x) => ({ id: String(x && x.id), h: x && x.h ? 1 : 0, n: Math.min(99, Math.max(1, +(x && x.n) | 0 || 1)) })).filter((x) => BYID[x.id]) : [];
+          grants.push({ gid: b.gid, k: b.k.toLowerCase(), num: num, cards: cs, packs: Math.min(1000, Math.max(0, +b.packs | 0)), at: +b.at || 0 });
+        }
         else if (b.t === 'account' && typeof b.k === 'string' && /^[a-z0-9_]{3,20}$/.test(b.k) && typeof b.salt === 'string' && typeof b.hash === 'string' && idOk(b.pid)) {
           if (!accounts[b.k] || accounts[b.k].num > num) accounts[b.k] = { k: b.k, u: String(b.u || b.k).slice(0, 20), salt: b.salt.slice(0, 64), hash: b.hash.slice(0, 128), iter: +b.iter || 0, pid: b.pid, created: +b.created || 0, num: num };
         }
       });
       net.cfgNum = cfgIssue ? cfgIssue.num : 0; net.imgNum = imgNum;
       applyCfg(cfgIssue ? cfgIssue.b : null, imgs); cacheCfg(imgs);
-      net.accounts = Object.keys(accounts).map((k) => accounts[k]);
+      net.accounts = Object.keys(accounts).map((k) => accounts[k]); net.grants = grants;
+      const byPid = {}; net.accounts.forEach((a) => { byPid[a.pid] = a; });
       // 2) players and trades
       const blocked = {}; net.cfg.blocked.forEach((x) => { blocked[x.id] = 1; });
       const players = {}, trades = [];
@@ -111,7 +116,7 @@
         if (b.t === 'player') { const p = cleanPlayer(b, num); if (p && !blocked[p.id] && (!players[p.id] || players[p.id].num > p.num)) players[p.id] = p; }
         else if (b.t === 'trade') { const t = cleanTrade(b, num); if (t && !blocked[t.from.id] && !blocked[t.to.id]) trades.push(t); }
       });
-      net.dir = Object.keys(players).map((k) => players[k]); net.trades = trades; net.last = Date.now(); net.loaded = true;
+      net.dir = Object.keys(players).map((k) => { const p = players[k]; p.acct = byPid[p.id] ? byPid[p.id].u : null; return p; }); net.trades = trades; net.last = Date.now(); net.loaded = true;
     }
     // Admin writes. Re-reads the config issue first so two edits do not overwrite each other.
     async function updateConfig(fn) {
@@ -156,13 +161,13 @@
       const s = S(), p = s.profile, cards = {};
       Object.keys(s.cards).forEach((id) => { const e = s.cards[id]; if (BYID[id] && e.n > 0) cards[id] = [e.n, e.h || 0, e.f ? 1 : 0, e.t || 0, e.l || 0]; });
       return { t: 'player', v: 1, id: p.id, name: p.name, hue: p.hue, pfp: p.pfp, banner: p.banner, joined: p.joined, seen: Date.now(), opened: s.stats.opened, pulls: s.stats.pulls, cards: cards,
-        save: { mod: s.mod || 0, packs: s.packs, last: s.last, sinceRare: s.sinceRare, started: s.started, stats: s.stats, codes: s.codes, net: s.net } };
+        save: { mod: s.mod || 0, granted: s.granted, packs: s.packs, last: s.last, sinceRare: s.sinceRare, started: s.started, stats: s.stats, codes: s.codes, net: s.net } };
     }
     // Uploads this device's save to the account's player issue. s.syncMod remembers which version the cloud holds, so a stale device can tell it must merge first.
     async function publish(force, keep) {
       const s = S(), c = conf(), snap = build(), key = JSON.stringify(Object.assign({}, snap, { seen: 0 }));
       if (net.cfg.blocked.some((x) => x.id === s.profile.id)) return; // removed from the leaderboard by the admin
-      const mine = net.dir.find(isMe) || (net.myNum ? { num: net.myNum } : null);
+      const mine = net.dir.find(isMe) || (net.myNum && Date.now() - net.createdAt < 120000 ? { num: net.myNum } : null); // the new-issue shortcut only covers GitHub's short listing delay
       if (!force && key === net.lastKey && Date.now() - net.lastBeat < BEAT_MS && (mine || Date.now() - net.createdAt < 120000)) return;
       let body = JSON.stringify(snap);
       if (body.length > MAX_BODY) { delete snap.banner; body = JSON.stringify(snap); }
@@ -188,7 +193,7 @@
       try {
         await refresh();
         if (net.cfg.blocked.some((x) => x.id === s.profile.id)) return 'Your player (id ' + s.profile.id + ') is on the admin\'s removed list (Admin page > Removed players), so it is never uploaded or shown. Press Restore there, then press this button again.';
-        net.createdAt = 0; net.lastKey = '';
+        net.createdAt = 0; net.myNum = 0; net.lastKey = '';
         const before = net.dir.find(isMe);
         await publish(true);
         await refresh();
@@ -209,6 +214,26 @@
       const localChanged = (s.mod || 0) > (s.syncMod || 0) || (!s.mod && !s.syncMod && Object.keys(s.cards).length > 0);
       ctx.mergeCloud(mine, localChanged || !mine.raw);
       return true;
+    }
+    // Cards and packs the admin gave to this account: applied once, then the grant is closed online.
+    const closedGrants = {};
+    function applyGrants() {
+      const s = S(); if (!s.account || ctx.busy()) return false; let any = false;
+      net.grants.filter((g) => g.k === s.account).forEach((g) => {
+        if (s.granted[g.gid]) return;
+        g.cards.forEach((it) => { for (let i = 0; i < it.n; i++) ctx.addCopy(it.id, it.h); });
+        if (g.packs) s.packs += g.packs;
+        s.granted[g.gid] = Date.now(); any = true;
+        const parts = g.cards.map((it) => BYID[it.id].name + (it.h ? ' (skibidi)' : '') + (it.n > 1 ? ' x' + it.n : '')); if (g.packs) parts.push(g.packs + ' pack' + (g.packs === 1 ? '' : 's'));
+        hist('The admin gave you: ' + (parts.join(', ') || 'a gift') + '.');
+      });
+      const ks = Object.keys(s.granted); if (ks.length > 300) ks.sort((a, b) => s.granted[a] - s.granted[b]).slice(0, ks.length - 300).forEach((k) => delete s.granted[k]);
+      if (any) { ctx.save(); toast('The admin sent you a gift! Check your collection.'); }
+      return any;
+    }
+    async function closeGrants() {
+      const s = S(), c = conf();
+      for (const g of net.grants.filter((x) => x.k === s.account && s.granted[x.gid] && !closedGrants[x.num])) { closedGrants[g.num] = 1; try { await gh('PATCH', `/repos/${c.repo}/issues/${g.num}`, { state: 'closed' }); } catch (e) { /* retried after a reload */ } }
     }
     // Upload soon after any change instead of waiting for the next 60 second cycle.
     let touchT = 0;
@@ -312,7 +337,7 @@
         if (!enabled()) { await fallback(); net.status = 'off'; net.msg = ''; }
         else {
           await refresh(); changedFlag = settle(); if (changedFlag) ctx.save();
-          await flushQ(); if (ctx.loggedIn()) { if (reconcile()) changedFlag = true; await publish(force); }
+          await flushQ(); if (ctx.loggedIn()) { if (reconcile()) changedFlag = true; if (applyGrants()) changedFlag = true; await publish(force); closeGrants(); }
           net.status = 'ok'; net.msg = '';
         }
       } catch (e) { net.status = 'err'; net.msg = e.message || 'Sync failed'; if (ctx.loggedIn() && Date.now() - lastWarn > 30000) { lastWarn = Date.now(); toast('Could not save to your account: ' + net.msg, true); } }
@@ -342,7 +367,7 @@
     const SORTS = [['score', 'Score'], ['unique', 'Unique cards'], ['opened', 'Packs opened'], ['skibidi', 'Skibidi cards'], ['seen', 'Recently online']];
     function pagePlayers() {
       $('#main').innerHTML = `<h1>Leaderboard</h1><p class="muted" id="plstatus"></p>
-        <div class="filters panel"><label class="f">Find a player<input id="plq" type="search" value="${esc(view.q)}" placeholder="Name or ID" autocomplete="off"></label>
+        <div class="filters panel"><label class="f">Find a player<input id="plq" type="search" value="${esc(view.q)}" placeholder="Name or username" autocomplete="off"></label>
         <label class="f">Rank by<select id="plsort">${SORTS.map(([v, l]) => `<option value="${v}" ${view.by === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div><div id="pllist"></div>`;
       $('#plq').oninput = (e) => { view.q = e.target.value; drawPlayers(); };
       $('#plsort').onchange = (e) => { view.by = e.target.value; drawPlayers(); };
@@ -351,11 +376,11 @@
     function drawPlayers() {
       const box = $('#pllist'); if (!box) return;
       const q = view.q.trim().toLowerCase(), key = view.by;
-      let list = net.dir.filter((p) => !q || p.name.toLowerCase().includes(q) || p.id.includes(q));
+      let list = net.dir.filter((p) => (p.acct || !net.accounts.length || !net.loaded || !enabled()) && (!q || p.name.toLowerCase().includes(q) || (p.acct || '').toLowerCase().includes(q)));
       list = list.slice().sort((a, b) => (b[key] - a[key]) || (b.score - a.score) || a.name.localeCompare(b.name));
       const medal = ['🥇', '🥈', '🥉'];
       box.innerHTML = list.length ? `<div class="pl-list">${list.map((p, i) => `<a class="pl-row ${isMe(p) ? 'me' : ''}" href="#user-${p.id}"><span class="pl-rank">${!q && i < 3 ? medal[i] : i + 1}</span>${ctx.avatarHTML(42, p)}
-          <span class="pl-name"><span class="pl-top"><b>${esc(p.name)}</b>${isMe(p) ? ' <small class="muted">(you)</small>' : ''}${online(p) ? ' <span class="online-dot" title="Online now"></span>' : ''}</span><small class="muted">${p.unique}/${CARDS.length} cards · ${p.opened} packs · ${p.skibidi} skibidi</small></span>
+          <span class="pl-name"><span class="pl-top"><b>${esc(p.name)}</b>${p.acct && p.acct.toLowerCase() !== p.name.toLowerCase() ? ` <small class="muted">@${esc(p.acct)}</small>` : ''}${isMe(p) ? ' <small class="muted">(you)</small>' : ''}${online(p) ? ' <span class="online-dot" title="Online now"></span>' : ''}</span><small class="muted">${p.unique}/${CARDS.length} cards · ${p.opened} packs · ${p.skibidi} skibidi</small></span>
           <span class="pl-score"><b>${ctx.fmt(p.score)}</b><small>pts</small></span></a>`).join('')}</div>`
         : `<div class="empty"><h2>${net.loaded ? 'No players found' : 'Loading...'}</h2><p class="muted">${net.loaded && !q ? 'Nobody has published a profile yet.' : ''}</p></div>`;
     }
@@ -364,7 +389,7 @@
       if (!p) { $('#main').innerHTML = `<div class="empty"><h2>${net.loaded ? 'Player not found' : 'Loading...'}</h2><p><a class="btn" href="#leaderboard">← Leaderboard</a></p></div>`; if (!net.loaded || Date.now() - net.last > 20000) cycle(); return; }
       const me = isMe(p), can = enabled() && !me && p.full;
       const actions = `<a class="btn" href="#leaderboard">← Leaderboard</a>${me ? '<button class="btn" data-act="edit-profile">✎ Edit profile</button>' : ''}${can ? `<button class="btn primary" data-net="trade" data-id="${p.id}">⇄ Trade with ${esc(p.name)}</button>` : ''}`;
-      $('#main').innerHTML = ctx.profileHTML(p, p.cards, { opened: p.opened }, actions, true, { score: p.score, unique: p.unique, skibidi: p.skibidi, rarest: p.rarest, lite: !p.full, online: online(p) });
+      $('#main').innerHTML = ctx.profileHTML(p, p.cards, { opened: p.opened }, actions, true, { score: p.score, unique: p.unique, skibidi: p.skibidi, rarest: p.rarest, lite: !p.full, online: online(p), acct: p.acct });
       $$('.card', $('#main')).forEach(ctx.tilt);
     }
     const mini = (list) => `<div class="tr-cards">${list.length ? list.map((it) => `<div class="tr-card">${ctx.cardHTML(BYID[it.id], { holo: !!it.h, size: 84 })}</div>`).join('') : '<span class="muted small">nothing</span>'}</div>`;

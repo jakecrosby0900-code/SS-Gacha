@@ -201,3 +201,6 @@ kbd{display:inline-block;min-width:1.6em;padding:1px 7px;border-radius:7px;borde
 #main section.panel+section.panel{margin-top:18px}
 .ad-edit{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start}.ad-fields{flex:1 1 260px;display:grid;gap:12px}.ad-prev{flex:0 0 auto;margin:0 auto}
 #adCards .card-btn{position:relative}.ad-tag{position:absolute;top:4px;right:4px;z-index:9;font-size:.65rem;padding:2px 6px;border-radius:999px;background:var(--accent2);color:#fff}
+
+.ad-pick{display:flex;flex-wrap:wrap;gap:6px;max-height:190px;overflow:auto;padding:6px;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.15)}
+.ad-pick .btn small{margin-left:4px}

@@ -1,6 +1,7 @@
 // Card data, tiers, difficulties. Everything is defined here so you can balance the game from one file.
 (function () {
   const TIERS = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary', 'Mythic', 'Sigma'];
+  const TIER0 = TIERS.slice(); // the built-in rarities; the admin can add more between them (see rebuild)
   const TIER_COLOR = { Common: '#8b97a3', Uncommon: '#4cc38a', Rare: '#4aa3ff', Epic: '#b36bff', Legendary: '#ffb02e', Mythic: '#ff4d6d', Sigma: '#ffffff' };
 
   // Your roster, exactly as supplied: category header lines, then "Name Rarity" per line.
@@ -105,11 +106,17 @@ The Big J Mythic`;
     MONSTER: { hue: 135, name: 'MONSTER', blurb: 'Only drops while the monster is let in (Settings).', monster: true }
   };
 
+  const CAT_BASE = Object.keys(CATS); // the built-in sets; the admin can add more
+
   function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
   function rng(seed) { let a = seed; return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
   // Points each card is worth, by tier. A player's score is the sum over every different card they own.
   const POINTS = [1, 3, 8, 20, 50, 125, 400];
+  const W0 = [50, 28, 14, 5, 2, 0.8, 0.08], P0 = POINTS.slice(), C0 = Object.assign({}, TIER_COLOR);
+  const TIER_FX = [0, 1, 2, 3, 4, 5, 6]; // how fancy the reveal is (built-ins: their own index; custom rarities sit half a step above the one they follow)
+  // Base chance weight of each tier for one card slot, before a difficulty's luck is applied to Rare and above.
+  const BASE_WEIGHTS = W0.slice();
 
   // Cards with their own picture instead of the generated face.
   const IMAGES = Object.assign({ 'EXTRA:Awesome Garfield NFT from like 10 years ago': 'images/garfield-nft.jpg' }, window.SSG_IMAGES || {});
@@ -145,36 +152,73 @@ The Big J Mythic`;
   // Admin config (stored online by the admin page): { blocked: [{id,name}], edits: { cardId: {name,tier,cat} }, added: [{id,name,cat,tier}] }
   const isObj = function (x) { return x && typeof x === 'object' && !Array.isArray(x); };
   function cleanConfig(b) {
-    const o = { blocked: [], edits: {}, added: [] };
+    const o = { blocked: [], edits: {}, added: [], tiers: [], sets: [] };
     if (!isObj(b)) return o;
+    const nmOk = function (v, n) { v = String(v == null ? '' : v).replace(/\s+/g, ' ').trim(); return v.length >= 1 && v.length <= n && /^[A-Za-z0-9 ]+$/.test(v) ? v : null; };
+    const tierNames = TIER0.slice(), catNames = CAT_BASE.slice();
+    // Custom sets and rarities first, so cards can use them.
+    if (Array.isArray(b.sets)) b.sets.slice(0, 40).forEach(function (x) {
+      const n = isObj(x) && nmOk(x.name, 12); if (!n || catNames.indexOf(n) >= 0) return;
+      catNames.push(n); o.sets.push({ name: n, hue: Number.isFinite(+x.hue) ? ((Math.round(+x.hue) % 360) + 360) % 360 : 200, blurb: String(x.blurb == null ? '' : x.blurb).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 90) });
+    });
+    if (Array.isArray(b.tiers)) b.tiers.slice(0, 20).forEach(function (x) {
+      const n = isObj(x) && nmOk(x.name, 14); if (!n || tierNames.some(function (t) { return t.toLowerCase() === n.toLowerCase(); })) return;
+      const after = tierNames.indexOf(x.after) >= 0 ? x.after : tierNames[tierNames.length - 1];
+      tierNames.push(n);
+      o.tiers.push({ name: n, color: /^#[0-9a-fA-F]{6}$/.test(x.color) ? x.color : '#ffffff', pts: Math.min(100000, Math.max(1, Math.round(+x.pts) || 1)), weight: Math.min(1000, Math.max(0.01, +x.weight || 1)), after: after });
+    });
     if (Array.isArray(b.blocked)) b.blocked.slice(0, 500).forEach(function (x) {
       if (x && typeof x.id === 'string' && /^[a-z0-9]{6,40}$/.test(x.id)) o.blocked.push({ id: x.id, name: String(x.name == null ? 'Player' : x.name).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 20) || 'Player' });
     });
     if (isObj(b.edits)) Object.keys(b.edits).slice(0, 1000).forEach(function (k) {
       const e = b.edits[k]; if (!isObj(e)) return; const r = {};
       if (typeof e.name === 'string' && e.name.trim()) r.name = e.name.replace(/[\r\n\t]+/g, ' ').trim().slice(0, 60);
-      if (TIERS.indexOf(e.tier) >= 0) r.tier = e.tier;
-      if (typeof e.cat === 'string' && CATS[e.cat]) r.cat = e.cat;
+      if (tierNames.indexOf(e.tier) >= 0) r.tier = e.tier;
+      if (typeof e.cat === 'string' && catNames.indexOf(e.cat) >= 0) r.cat = e.cat;
       o.edits[String(k).slice(0, 120)] = r;
     });
     if (Array.isArray(b.added)) b.added.slice(0, 500).forEach(function (a) {
       if (!isObj(a) || typeof a.id !== 'string' || !a.id || a.id.length > 120 || a.id.indexOf('|') >= 0) return;
       const name = String(a.name == null ? '' : a.name).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 60);
-      if (!name || !CATS[a.cat] || TIERS.indexOf(a.tier) < 0) return;
+      if (!name || catNames.indexOf(a.cat) < 0 || tierNames.indexOf(a.tier) < 0) return;
       o.added.push({ id: a.id, name: name, cat: a.cat, tier: a.tier });
     });
     return o;
   }
 
   let CONFIG = cleanConfig(null), CONFIG_IMAGES = {};
+  const slug = function (t) { return String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-'); };
+  // Puts the admin's custom sets and rarities into the live TIERS / CATS / weights, in place.
+  function rebuildTiers() {
+    Object.keys(CATS).forEach(function (k) { if (CAT_BASE.indexOf(k) < 0) delete CATS[k]; });
+    CONFIG.sets.forEach(function (x) { CATS[x.name] = { hue: x.hue, name: x.name, blurb: x.blurb || 'A custom set.', custom: true }; });
+    const L = TIER0.map(function (n, i) { return { name: n, color: C0[n], pts: P0[i], w: W0[i], fx: i }; });
+    CONFIG.tiers.forEach(function (x) {
+      let at = -1; L.forEach(function (t, i) { if (t.name === x.after) at = i; });
+      if (at < 0) at = L.length - 1;
+      L.splice(at + 1, 0, { name: x.name, color: x.color, pts: x.pts, w: x.weight, fx: L[at].fx + (L[at].fx % 1 ? 0 : 0.5), custom: true });
+    });
+    TIERS.length = 0; POINTS.length = 0; BASE_WEIGHTS.length = 0; TIER_FX.length = 0;
+    Object.keys(TIER_COLOR).forEach(function (k) { delete TIER_COLOR[k]; });
+    L.forEach(function (t) { TIERS.push(t.name); POINTS.push(t.pts); BASE_WEIGHTS.push(t.w); TIER_FX.push(t.fx); TIER_COLOR[t.name] = t.color; });
+    BYTIER.length = 0; POOL.length = 0; TIERS.forEach(function () { BYTIER.push([]); POOL.push([]); });
+    if (typeof document !== 'undefined') {
+      let st = document.getElementById('ssg-tiers'); if (!st) { st = document.createElement('style'); st.id = 'ssg-tiers'; document.head.appendChild(st); }
+      st.textContent = ':root{' + L.filter(function (t) { return t.custom; }).map(function (t) { return '--t-' + slug(t.name) + ':' + t.color + ';'; }).join('') + '}' + L.filter(function (t) { return t.custom; }).map(function (t) {
+        const c = 'var(--t-' + slug(t.name) + ')', k = '.t-' + slug(t.name);
+        return k + ' .tier-text,.tier-text' + k + '{color:' + c + '}.card' + k + ',.special' + k + ',.unit' + k + '{--tc:' + c + '}.slot.revealed' + k + ' .flipper{filter:drop-shadow(0 0 20px ' + c + ')}.idx-item' + k + ' .dot{background:' + c + '}.tier-prog>' + k + '{--tc:' + c + '}';
+      }).join('');
+    }
+  }
   function rebuild() {
+    rebuildTiers();
     const list = [], seen = {};
     BASE.forEach(function (b) { const e = CONFIG.edits[b.id] || {}; seen[b.id] = 1; list.push({ id: b.id, name: e.name || b.name, cat: e.cat || b.cat, tier: e.tier || b.tier, custom: false, img: CONFIG_IMAGES[b.id] || IMAGES[b.id] || null }); });
     CONFIG.added.forEach(function (a) { if (seen[a.id]) return; seen[a.id] = 1; const e = CONFIG.edits[a.id] || {}; list.push({ id: a.id, name: e.name || a.name, cat: e.cat || a.cat, tier: e.tier || a.tier, custom: true, img: CONFIG_IMAGES[a.id] || null }); });
     CARDS.length = 0; Object.keys(BYID).forEach(function (k) { delete BYID[k]; });
-    BYTIER.forEach(function (l) { l.length = 0; }); POOL.forEach(function (l) { l.length = 0; }); MONSTER_POOL.length = 0;
+    MONSTER_POOL.length = 0;
     list.forEach(function (c) {
-      c.ti = TIERS.indexOf(c.tier); c.pts = POINTS[c.ti]; c.monster = !!CATS[c.cat].monster;
+      c.ti = TIERS.indexOf(c.tier); c.fx = TIER_FX[c.ti]; c.pts = POINTS[c.ti]; c.monster = !!CATS[c.cat].monster;
       CARDS.push(c); BYID[c.id] = c; BYTIER[c.ti].push(c); if (c.monster) MONSTER_POOL.push(c); else POOL[c.ti].push(c);
     });
     // Rank 1 = hardest to pull. Ties break by set order, then name.
@@ -190,8 +234,6 @@ The Big J Mythic`;
   // Build the starting roster now (the admin config is applied later, once it has loaded).
   rebuild();
 
-  // Base chance weight of each tier for one card slot, before a difficulty's luck is applied to Rare and above.
-  const BASE_WEIGHTS = [50, 28, 14, 5, 2, 0.8, 0.08];
   // Coins gained when recycling a spare copy.
   const SELL = [5, 12, 30, 80, 200, 500, 1500];
 
@@ -210,5 +252,5 @@ The Big J Mythic`;
   };
 
   window.SSG = { applyConfig: applyConfig, cleanConfig: cleanConfig, getConfig: function () { return CONFIG; }, BASE: BASE, TIERS: TIERS, TIER_COLOR: TIER_COLOR, CATS: CATS, CARDS: CARDS, BYID: BYID, BYTIER: BYTIER, POOL: POOL, MONSTER_POOL: MONSTER_POOL, MONSTER_CHANCE: MONSTER_CHANCE,
-    BASE_WEIGHTS: BASE_WEIGHTS, SELL: SELL, POINTS: POINTS, CODES: CODES, DIFFS: DIFFS, hash: hash, rng: rng };
+    BASE_WEIGHTS: BASE_WEIGHTS, TIER_FX: TIER_FX, TIER0: TIER0, CAT_BASE: CAT_BASE, SELL: SELL, POINTS: POINTS, CODES: CODES, DIFFS: DIFFS, hash: hash, rng: rng };
 })();

@@ -9,7 +9,7 @@
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const tcls = (t) => 't-' + t.toLowerCase();
+  const tcls = (t) => 't-' + String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-');
   const reduceMotion = () => S.settings.motion === false || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const fmt = (n) => Math.round(n).toLocaleString('en-US');
@@ -19,7 +19,7 @@
   const KEY = 'ss-gacha-save-v1';
   let memorySave = null; // used if localStorage is blocked
   function fresh() {
-    return { v: 1, mod: 0, syncMod: 0, started: false, diff: 'sigma', packs: DIFFS.sigma.start, last: Date.now(), sinceRare: 0, cards: {},
+    return { v: 1, mod: 0, syncMod: 0, granted: {}, started: false, diff: 'sigma', packs: DIFFS.sigma.start, last: Date.now(), sinceRare: 0, cards: {},
       stats: { opened: 0, pulls: 0 }, settings: { sound: true, volume: 0.6, motion: true, monster: false, share: true },
       // The "fake account": lives in the save file. id is random and only there so a leaderboard can tell players apart later.
       profile: { id: uid(), name: 'Player', pfp: null, banner: null, hue: 28, joined: Date.now() }, codes: [], account: null,
@@ -36,6 +36,7 @@
     const times = Object.values(s.cards || {}).map((e) => e && e.t).filter(Boolean);
     s.profile = { id: String(jp.id || f.profile.id).slice(0, 40), name: String(jp.name || 'Player').slice(0, 20), pfp: okImg(jp.pfp), banner: okImg(jp.banner),
       hue: Number.isFinite(+jp.hue) ? ((+jp.hue % 360) + 360) % 360 : 28, joined: +jp.joined || (times.length ? Math.min.apply(null, times) : Date.now()) };
+    s.granted = isObj(j.granted) ? j.granted : {};
     s.mod = +j.mod || 0; s.syncMod = +j.syncMod || 0; s.settings.share = true; // sharing is always on now: the account save depends on it
     s.codes = Array.isArray(j.codes) ? j.codes.map(String) : [];
     s.account = typeof j.account === 'string' && j.account ? j.account.slice(0, 20) : null;
@@ -66,7 +67,7 @@
     const n = Math.floor((now - S.last) / iv);
     if (n > 0) { S.packs += Math.min(n, d.cap - S.packs); S.last += n * iv; if (S.packs >= d.cap) S.last = now; save(true); }
   }
-  function weights(d, forceRare) { return G.BASE_WEIGHTS.map((w, i) => (forceRare && i < 2 ? 0 : i >= 2 ? w * d.luck : w)); }
+  function weights(d, forceRare) { return G.BASE_WEIGHTS.map((w, i) => (!G.POOL[i].length || (forceRare && G.TIER_FX[i] < 2) ? 0 : G.TIER_FX[i] >= 2 ? w * d.luck : w)); }
   function pickIdx(w) { let t = w.reduce((a, b) => a + b, 0), r = Math.random() * t; for (let i = 0; i < w.length; i++) { r -= w[i]; if (r < 0) return i; } return w.length - 1; }
   function rollCard(d, force) { const tier = G.POOL[pickIdx(weights(d, force))]; return pick(tier); }
   // Monster-only cards: weighted by tier, so the rarer ones really are rare.
@@ -77,7 +78,7 @@
       if (S.settings.monster && Math.random() < G.MONSTER_CHANCE) out.push({ card: rollMonsterCard(), holo: Math.random() < d.holo, monsterDrop: true });
       else out.push({ card: rollCard(d, false), holo: Math.random() < d.holo });
     }
-    if (out.some((o) => o.card.ti >= 2)) S.sinceRare = 0;
+    if (out.some((o) => o.card.fx >= 2)) S.sinceRare = 0;
     else { S.sinceRare++; if (d.pity && S.sinceRare >= d.pity) { out[out.length - 1] = { card: rollCard(d, true), holo: Math.random() < d.holo, pity: true }; S.sinceRare = 0; } }
     // The monster never eats its own cards.
     if (S.settings.monster && Math.random() < 0.25) { const ok = out.filter((o) => !o.card.monster); if (ok.length) pick(ok).eaten = true; }
@@ -142,7 +143,7 @@
   const newLabel = (isNew) => (isNew ? `<span class="new-under">${isNew === 'holo' ? 'NEW SKIBIDI' : 'NEW!'}</span>` : '');
   function cardHTML(c, o) {
     o = o || {};
-    const sp = o.holo || c.ti >= 4 ? Array.from({ length: 3 + c.ti }, (_, i) => `<i class="sparkle" style="left:${(i * 37) % 88 + 6}%;top:${(i * 53) % 80 + 8}%;animation-delay:${(i * 0.37).toFixed(2)}s"></i>`).join('') : '';
+    const sp = o.holo || c.fx >= 4 ? Array.from({ length: 3 + c.ti }, (_, i) => `<i class="sparkle" style="left:${(i * 37) % 88 + 6}%;top:${(i * 53) % 80 + 8}%;animation-delay:${(i * 0.37).toFixed(2)}s"></i>`).join('') : '';
     const label = `${o.locked ? 'Not found yet' : c.name}, ${c.cat}, ${c.tier}${o.holo ? ', skibidi' : ''}`;
     return `<div class="card ${tcls(c.tier)} ${o.holo ? 'holo' : ''} ${o.locked ? 'locked' : ''} ${o.ghost ? 'ghost' : ''}" ${o.size ? `style="--cw:${o.size}px"` : ''} aria-label="${esc(label)}" data-id="${c.id}">
       <div class="card-in">
@@ -269,11 +270,11 @@
     const sections = ov.lite ? `<p class="muted">Only a summary is available right now. Connect GitHub in Settings to see their cards.</p>`
       : `<section><h2>Recent cards</h2>${grid(recent, 'No cards yet.')}</section><section><h2>Favorite cards</h2>${grid(favs, 'No favorites yet.')}</section>${full ? `<section><h2>Collection <span class="muted small">${ents.length} cards</span></h2>${grid(ents.slice().sort(byRar), 'Nothing yet.')}</section>` : ''}`;
     return `<section class="panel profile"><div class="pf-banner" style="${bannerCSS(p)}"></div>
-        <div class="pf-head">${avatarHTML(104, p)}<div class="pf-id"><h1>${esc(p.name)}${ov.online ? ' <span class="online-dot" title="Online now"></span>' : ''}</h1><p class="muted small">Playing since ${new Date(p.joined).toLocaleDateString('en-GB')} · ID ${esc(String(p.id).slice(-6))}</p></div><div class="row wrap pf-actions">${actions || ''}</div></div>
+        <div class="pf-head">${avatarHTML(104, p)}<div class="pf-id"><h1>${esc(p.name)}${ov.online ? ' <span class="online-dot" title="Online now"></span>' : ''}</h1><p class="muted small">Playing since ${new Date(p.joined).toLocaleDateString('en-GB')}${ov.acct ? ' · @' + esc(ov.acct) : ''}</p></div><div class="row wrap pf-actions">${actions || ''}</div></div>
         <div class="facts pf-facts">${facts.map(([v, l]) => `<div><b>${v}</b><span>${l}</span></div>`).join('')}</div></section>${sections}`;
   }
   function pageProfile() {
-    main().innerHTML = profileHTML(S.profile, S.cards, S.stats, '<button class="btn" data-act="edit-profile">✎ Edit profile</button>', false);
+    main().innerHTML = profileHTML(S.profile, S.cards, S.stats, '<button class="btn" data-act="edit-profile">✎ Edit profile</button>', false, { acct: S.account });
     $$('.card', main()).forEach(tilt);
   }
 
@@ -380,7 +381,7 @@
       const list = CARDS.filter((c) => c.cat === k).sort((a, b) => b.ti - a.ti || a.name.localeCompare(b.name)), got = list.filter((c) => S.cards[c.id]).length;
       return `<section class="panel set"><div class="set-head"><div><h2>${k}</h2><p class="muted small">${CATS[k].blurb}</p></div><div class="set-prog"><b>${got}/${list.length}</b><div class="bar"><i style="width:${got / list.length * 100}%"></i></div></div></div>
         <div class="card-grid small idx-grid">${list.map((c) => { const x = S.cards[c.id]; return `<button class="card-btn" data-act="card" data-id="${c.id}">${cardHTML(c, { ghost: !x && !c.monster, locked: !x && c.monster, holo: x && x.h > 0, count: x && x.n, size: 128 })}</button>`; }).join('')}</div></section>`;
-    }).join('') + `<section class="panel"><h2>By rarity</h2><div class="tier-prog">${TIERS.map((t, i) => { const l = G.BYTIER[i], g = l.filter((c) => S.cards[c.id]).length; return `<div class="${tcls(t)}"><span>${t}</span><div class="bar"><i style="width:${g / l.length * 100}%"></i></div><b>${g}/${l.length}</b></div>`; }).join('')}</div></section>`;
+    }).join('') + `<section class="panel"><h2>By rarity</h2><div class="tier-prog">${TIERS.map((t, i) => { const l = G.BYTIER[i], g = l.filter((c) => S.cards[c.id]).length; return `<div class="${tcls(t)}"><span>${t}</span><div class="bar"><i style="width:${l.length ? g / l.length * 100 : 0}%"></i></div><b>${g}/${l.length}</b></div>`; }).join('')}</div></section>`;
     $$('.idx-grid .card', main()).forEach(tilt);
   }
 
@@ -509,19 +510,19 @@
           const o = cs[i], c = o.card, slot = $(`.slot[data-i="${i}"]`, row);
           await wait(380); if (skipped) break;
           if (o.eaten) { SFX.tear(); $('.flipper', slot).classList.add('flipped'); slot.classList.add('revealed'); fx.burst(['#ff4d6d', '#4ade80', '#000'], 60); $('.reveal-label', slot).innerHTML = `<span class="monster-line">The monster ate <b>${esc(c.name)}</b>!</span>`; say(`The monster ate ${c.name}`); await wait(1200); continue; }
-          if (c.ti >= 3) { slot.classList.add('suspense'); for (let k = 0; k < 3 && !skipped; k++) { SFX.shake(2); await wait(220); } slot.classList.remove('suspense'); }
-          if (c.ti >= 4) await specialReveal(ov, o, fx, () => skipped);
-          SFX.flip(); $('.flipper', slot).classList.add('flipped'); slot.classList.add('revealed'); SFX.reveal(c.ti);
-          if (o.holo) { setTimeout(() => SFX.holo(), 150); fx.burst(RAINBOW, 80, true); } else if (c.ti >= 3) fx.burst([TC[c.tier], '#fff'], 30 + c.ti * 16);
+          if (c.fx >= 3) { slot.classList.add('suspense'); for (let k = 0; k < 3 && !skipped; k++) { SFX.shake(2); await wait(220); } slot.classList.remove('suspense'); }
+          if (c.fx >= 4) await specialReveal(ov, o, fx, () => skipped);
+          SFX.flip(); $('.flipper', slot).classList.add('flipped'); slot.classList.add('revealed'); SFX.reveal(Math.floor(c.fx));
+          if (o.holo) { setTimeout(() => SFX.holo(), 150); fx.burst(RAINBOW, 80, true); } else if (c.fx >= 3) fx.burst([TC[c.tier], '#fff'], 30 + c.ti * 16);
           $('.reveal-label', slot).innerHTML = `<span class="tier-text ${tcls(c.tier)}">${c.tier}</span>${o.holo ? ' <span class="holo-badge static">SKIBIDI</span>' : ''}${newLabel(o.isNew)}${o.monsterDrop ? '<span class="monster-drop">👹 Monster drop</span>' : ''}`;
           say(`Card ${i + 1}: ${c.name}, ${c.tier}${o.holo ? ', skibidi' : ''}${o.isNew ? ', new' : ''}`);
-          await wait(c.ti >= 4 ? 900 : 430);
+          await wait(c.fx >= 4 ? 900 : 430);
         }
         if (!skipped) await wait(650);
         row.remove();
       } else {
-        for (const o of sorted) { if (skipped) break; if (o.card.ti >= 4) await specialReveal(ov, o, fx, () => skipped); }
-        if (!skipped) { SFX.reveal(sorted[0].card.ti); }
+        for (const o of sorted) { if (skipped) break; if (o.card.fx >= 4) await specialReveal(ov, o, fx, () => skipped); }
+        if (!skipped) { SFX.reveal(Math.floor(sorted[0].card.fx)); }
       }
       $('.skip', ov)?.remove(); $('.special', ov)?.remove();
       // summary
@@ -550,9 +551,9 @@
   async function specialReveal(ov, o, fx, isSkipped) {
     if (isSkipped()) return; const c = o.card;
     const sp = document.createElement('div'); sp.className = 'special ' + tcls(c.tier);
-    sp.innerHTML = `<div class="sp-rays"></div><div class="sp-text">${c.tier === 'Sigma' ? 'SIGMA' : c.tier.toUpperCase()} PULL</div>`;
-    ov.append(sp); SFX[c.ti >= 6 ? 'apex' : 'reveal'](c.ti); fx.burst(c.ti >= 6 ? RAINBOW : [TC[c.tier], '#fff'], 120);
-    const ms = c.ti >= 6 ? 2300 : 1300; const t0 = Date.now();
+    sp.innerHTML = `<div class="sp-rays"></div><div class="sp-text">${c.tier.toUpperCase()} PULL</div>`;
+    ov.append(sp); SFX[c.fx >= 6 ? 'apex' : 'reveal'](Math.floor(c.fx)); fx.burst(c.fx >= 6 ? RAINBOW : [TC[c.tier], '#fff'], 120);
+    const ms = c.fx >= 6 ? 2300 : 1300; const t0 = Date.now();
     while (Date.now() - t0 < ms && !isSkipped()) await sleep(40);
     sp.remove();
   }
@@ -616,7 +617,7 @@
         Object.keys(cc).forEach((id) => { const a = next.cards[id], b = cc[id];
           if (!a) next.cards[id] = b; else { a.n = Math.max(a.n, b.n); a.h = Math.min(a.n, Math.max(a.h || 0, b.h || 0)); a.f = a.f || b.f ? 1 : 0; a.t = Math.min(a.t || b.t, b.t || a.t); a.l = Math.max(a.l || 0, b.l || 0); } });
         const cloudNewer = p.mod > (S.mod || 0);
-        next.codes = Array.from(new Set((next.codes || []).concat(raw.codes || [])));
+        next.codes = Array.from(new Set((next.codes || []).concat(raw.codes || []))); next.granted = Object.assign({}, raw.granted || {}, S.granted || {});
         next.stats = { opened: Math.max(S.stats.opened, +(raw.stats && raw.stats.opened) || 0), pulls: Math.max(S.stats.pulls, +(raw.stats && raw.stats.pulls) || 0) };
         if (cloudNewer) { ['packs', 'last', 'sinceRare', 'started'].forEach((k) => { if (raw[k] != null) next[k] = raw[k]; }); if (raw.net) next.net = Object.assign({}, raw.net, { done: Object.assign({}, S.net.done, raw.net.done || {}) }); next.profile = Object.assign({}, S.profile, prof); }
         next.syncMod = p.mod; next.mod = Math.max(Date.now(), p.mod + 1);

@@ -31,7 +31,8 @@ Nobody can play until they are signed in (`js/auth.js`). Accounts use the same G
 
 ## Admin page
 Settings > Admin: log in with the admin username and password, then open the Admin page (`js/admin.js`). It can:
-- remove players from the leaderboard (and restore them) and delete accounts,
+- list every account with its leaderboard stats: give it cards or packs (applied the next time that player is online), remove it from the leaderboard, restore it (or restore everyone at once), or delete it,
+- add custom rarities (name, colour, points, drop weight, where it sits in the order) and custom sets,
 - add new cards, edit any card's name, set and rarity, and upload card pictures.
 
 Changes are saved online (a `config:game` issue, plus one `cardimg` issue per uploaded picture), so every player sees them. Do not close or edit those issues by hand. The leaderboard Action reads the config too, so removed players stay off `data/leaderboard.json`.
