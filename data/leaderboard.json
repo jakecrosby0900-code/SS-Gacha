@@ -1,31 +1,31 @@
 {
- "updated": 1794954417553,
+ "updated": 1794954493975,
  "players": [
-  {
-   "id": "mwl6d0nyb6w3i0",
-   "name": "jakecrosby",
-   "hue": 28,
-   "pfp": null,
-   "joined": 1794952301738,
-   "seen": 1794954375928,
-   "opened": 1,
-   "score": 31,
-   "unique": 5,
-   "skibidi": 0,
-   "rarest": "Bugtrap"
-  },
   {
    "id": "mwl9ialqb6eanb",
    "name": "mananimations",
    "hue": 28,
    "pfp": null,
    "joined": 1794954407111,
-   "seen": 1794954407556,
-   "opened": 0,
-   "score": 0,
-   "unique": 0,
+   "seen": 1794954469410,
+   "opened": 23,
+   "score": 299,
+   "unique": 41,
+   "skibidi": 2,
+   "rarest": "The Mimic"
+  },
+  {
+   "id": "mwl6d0nyb6w3i0",
+   "name": "jakecrosby",
+   "hue": 28,
+   "pfp": null,
+   "joined": 1794952301738,
+   "seen": 1794954464055,
+   "opened": 1,
+   "score": 31,
+   "unique": 5,
    "skibidi": 0,
-   "rarest": null
+   "rarest": "Bugtrap"
   }
  ]
 }
