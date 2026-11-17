@@ -1,18 +1,18 @@
 {
- "updated": 1794933962146,
+ "updated": 1794934080826,
  "players": [
   {
-   "id": "mwkxbdkqag3okl",
+   "id": "mwjvvhk77bm0c3",
    "name": "Player",
    "hue": 28,
    "pfp": null,
-   "joined": 1794933926522,
-   "seen": 1794933951694,
-   "opened": 1,
-   "score": 28,
-   "unique": 5,
-   "skibidi": 0,
-   "rarest": "Mighty Jimmy"
+   "joined": 1794866454265,
+   "seen": 1794934060664,
+   "opened": 51,
+   "score": 657,
+   "unique": 51,
+   "skibidi": 3,
+   "rarest": "Redacted"
   },
   {
    "id": "mwkx487ox8yl1m",
@@ -20,12 +20,25 @@
    "hue": 28,
    "pfp": null,
    "joined": 1794933592980,
-   "seen": 1794933948030,
+   "seen": 1794933988803,
    "opened": 1,
-   "score": 7,
+   "score": 26,
    "unique": 5,
    "skibidi": 0,
-   "rarest": "Cindy"
+   "rarest": "Mighty Jimmy"
+  },
+  {
+   "id": "mwkxbdkqag3okl",
+   "name": "Player",
+   "hue": 28,
+   "pfp": null,
+   "joined": 1794933926522,
+   "seen": 1794933987035,
+   "opened": 1,
+   "score": 9,
+   "unique": 5,
+   "skibidi": 0,
+   "rarest": "Candy"
   },
   {
    "id": "mwkx16ga7k0aur",
