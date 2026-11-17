@@ -1,5 +1,5 @@
 {
- "updated": 1794933627675,
+ "updated": 1794933877094,
  "players": [
   {
    "id": "mwkx16ga7k0aur",
@@ -21,6 +21,19 @@
    "pfp": null,
    "joined": 1794933610788,
    "seen": 1794933611297,
+   "opened": 0,
+   "score": 0,
+   "unique": 0,
+   "skibidi": 0,
+   "rarest": null
+  },
+  {
+   "id": "mwkx9y7stihylp",
+   "name": "Player",
+   "hue": 28,
+   "pfp": null,
+   "joined": 1794933859960,
+   "seen": 1794933861085,
    "opened": 0,
    "score": 0,
    "unique": 0,
