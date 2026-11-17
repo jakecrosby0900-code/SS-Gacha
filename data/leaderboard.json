@@ -1,5 +1,5 @@
 {
- "updated": 1794954646432,
+ "updated": 1794954699508,
  "players": [
   {
    "id": "mwl9ialqb6eanb",
@@ -7,7 +7,7 @@
    "hue": 28,
    "pfp": null,
    "joined": 1794954407111,
-   "seen": 1794954565906,
+   "seen": 1794954657043,
    "opened": 25,
    "score": 307,
    "unique": 42,
@@ -20,12 +20,12 @@
    "hue": 28,
    "pfp": null,
    "joined": 1794952301738,
-   "seen": 1794954618726,
-   "opened": 1,
-   "score": 23,
-   "unique": 4,
+   "seen": 1794954698015,
+   "opened": 0,
+   "score": 0,
+   "unique": 0,
    "skibidi": 0,
-   "rarest": "Bugtrap"
+   "rarest": null
   }
  ]
 }
