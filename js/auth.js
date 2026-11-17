@@ -55,9 +55,10 @@
       try { num = await net.createIssue('account:' + k, { t: 'account', v: 1, u: u, k: k, salt: salt, iter: ITER, hash: hash, pid: pid, created: Date.now() }); }
       catch (e) { throw fail('Could not create the account: ' + e.message); }
       // Two people can pick the same name at the same moment: the oldest issue wins, the other one backs off.
-      await net.refresh();
-      const mine = net.state.accounts.find((a) => a.k === k);
-      if (!mine || mine.num !== num) { try { await net.closeIssue(num); } catch (e) { /* ignore */ } throw fail('That username was just taken. Try another.'); }
+      // GitHub can take a moment to list a brand-new issue, so not seeing ours yet is fine. Only an OLDER account with this name means we lost.
+      await new Promise((r) => setTimeout(r, 1500));
+      try { await net.refresh(); } catch (e) { /* the account is created; carry on */ }
+      if (net.state.accounts.some((a) => a.k === k && a.num < num)) { try { await net.closeIssue(num); } catch (e) { /* ignore */ } throw fail('That username was just taken. Try another.'); }
       const acc = { k: k, u: u, pid: pid };
       if (S.account) { const f = ctx.fresh(); f.profile.id = pid; f.profile.name = u; f.account = k; ctx.adopt(f); }
       else { S.account = k; if (!S.profile.name || S.profile.name === 'Player') S.profile.name = u; S.profile.id = pid; ctx.save(); }
