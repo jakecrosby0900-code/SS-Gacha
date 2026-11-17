@@ -633,6 +633,24 @@
   // If the saved game on this device does not belong to the signed-in account any more (for example site data was cleared), sign in again.
   (function () { const se = auth.session(); if (se && (S.account !== se.k || S.profile.id !== se.pid)) { try { localStorage.removeItem('ss-gacha-session'); } catch (e) { /* ignore */ } } })();
   net.loadCache(); // show admin-made card changes straight away; the online sync refreshes them
+  // ---------- auto update ----------
+  // version.json holds the newest version number. A tab running an older one reloads itself (after uploading its save), so old tabs do not overwrite newer data.
+  const VERSION = 9;
+  async function checkVersion() {
+    try {
+      const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;
+      const j = await r.json(); if (!(+j.v > VERSION)) return;
+      if (opening || $('.modal-bg')) return; // wait for a quiet moment
+      let last = 0; try { last = +sessionStorage.getItem('ssg-reloaded') || 0; } catch (e) { /* ignore */ }
+      if (Date.now() - last < 300000) { if (!$('#updBar')) { const b = document.createElement('div'); b.id = 'updBar'; b.className = 'toast'; b.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:50'; b.innerHTML = 'A new version is out. <a href="#" onclick="location.reload(true);return false">Refresh</a>'; document.body.append(b); } return; }
+      try { sessionStorage.setItem('ssg-reloaded', String(Date.now())); } catch (e) { /* ignore */ }
+      save(true); try { if (net) net.flush(); } catch (e) { /* ignore */ }
+      setTimeout(() => location.reload(), 1200);
+    } catch (e) { /* offline: try again later */ }
+  }
+  setInterval(() => { if (!document.hidden) checkVersion(); }, 120000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkVersion(); });
+  setTimeout(checkVersion, 8000);
   tick(); route(); net.start();
   window.__ssg = { get S() { return S; }, save, route, net };
 })();

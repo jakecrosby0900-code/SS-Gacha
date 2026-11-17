@@ -39,3 +39,6 @@ Changes are saved online (a `config:game` issue, plus one `cardimg` issue per up
 The admin login is stored only as a salted hash in `js/admin.js`. To change it, run this in Node and paste the new `salt` and `hash` into `ADMIN`:
 `node -e "const c=require('crypto');const s=c.randomBytes(16);console.log(s.toString('base64'),c.pbkdf2Sync('USER\\nPASSWORD',s,150000,32,'sha256').toString('base64'))"`
 This check runs in the browser, so it keeps normal players out but is not real security (see the note on the shared token above).
+
+## Releasing an update
+Open tabs check `version.json` every couple of minutes and reload themselves when its number is higher than the `VERSION` constant in `js/app.js`. When you publish a new version, raise `VERSION` in `js/app.js` and `v` in `version.json` to the same new number (and the `?v=` on the script tags in `index.html` so browsers fetch fresh files).

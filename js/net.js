@@ -485,6 +485,6 @@
     }
     // The Online panel in Settings is switched off. Return settingsHTML/bindSettings below to bring it back (share toggle, own token, restore from cloud).
     const SHOW_SETTINGS = false;
-    return { gh: gh, conf: conf, enabled: enabled, refresh: refresh, updateConfig: updateConfig, saveCardImage: saveCardImage, closeIssue: closeIssue, createIssue: createIssue, loadCache: loadCache, start: start, touch: touch, diag: diag, paint: paint, cycle: cycle, pagePlayers: pagePlayers, pageUser: pageUser, pageTrades: pageTrades, settingsHTML: () => (SHOW_SETTINGS ? settingsHTML() : ''), bindSettings: () => { if (SHOW_SETTINGS) bindSettings(); }, state: net, build: build };
+    return { gh: gh, conf: conf, enabled: enabled, refresh: refresh, updateConfig: updateConfig, saveCardImage: saveCardImage, closeIssue: closeIssue, createIssue: createIssue, loadCache: loadCache, start: start, touch: touch, flush: flush, diag: diag, paint: paint, cycle: cycle, pagePlayers: pagePlayers, pageUser: pageUser, pageTrades: pageTrades, settingsHTML: () => (SHOW_SETTINGS ? settingsHTML() : ''), bindSettings: () => { if (SHOW_SETTINGS) bindSettings(); }, state: net, build: build };
   };
 })();
