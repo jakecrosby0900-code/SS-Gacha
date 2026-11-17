@@ -33,11 +33,11 @@
       return { repo: st.repo || base.repo || detectRepo(), token: st.token || shared, api: String(st.api || base.api || 'https://api.github.com').replace(/\/$/, ''), personal: !!st.token };
     }
     const enabled = () => { const c = conf(); return !!(c.repo && c.token); };
-    async function gh(method, path, body) {
+    async function gh(method, path, body, keep) {
       const c = conf(), headers = { Accept: 'application/vnd.github+json' };
       if (c.token) headers.Authorization = 'Bearer ' + c.token;
       if (body) headers['Content-Type'] = 'application/json';
-      const r = await fetch(c.api + path, { method, headers, body: body ? JSON.stringify(body) : undefined, cache: 'no-store' });
+      const r = await fetch(c.api + path, { method, headers, body: body ? JSON.stringify(body) : undefined, cache: 'no-store', keepalive: !!keep });
       if (!r.ok) {
         const e = new Error(r.status === 401 ? 'Token rejected (401)' : r.status === 403 || r.status === 429 ? 'GitHub rate limit or permission problem (' + r.status + ')' : r.status === 404 ? 'Repo or issue not found (404). Check the repo name and token access.' : 'GitHub error ' + r.status);
         e.status = r.status; throw e;
@@ -57,7 +57,7 @@
       const cards = {};
       if (b.cards && typeof b.cards === 'object') Object.keys(b.cards).forEach((cid) => { const a = b.cards[cid]; if (BYID[cid] && Array.isArray(a) && +a[0] > 0) { const n = Math.min(9999, +a[0] | 0); cards[cid] = { n: n, h: Math.min(n, Math.max(0, +a[1] | 0)), f: a[2] ? 1 : 0, t: +a[3] || 0, l: +a[4] || 0 }; } });
       return derive({ id: id, name: nm(b.name), hue: Number.isFinite(+b.hue) ? ((+b.hue % 360) + 360) % 360 : 28, pfp: okImg(b.pfp), banner: okImg(b.banner), joined: +b.joined || 0, seen: +b.seen || 0,
-        opened: +(b.opened) || 0, pulls: +(b.pulls) || 0, cards: cards, num: num, full: true, raw: b.save && typeof b.save === 'object' ? b.save : null });
+        mod: +(b.save && b.save.mod) || +b.seen || 0, opened: +(b.opened) || 0, pulls: +(b.pulls) || 0, cards: cards, num: num, full: true, raw: b.save && typeof b.save === 'object' ? b.save : null });
     }
     const items = (a) => (Array.isArray(a) ? a.slice(0, 12).map((x) => ({ id: String(x && x.id), h: x && x.h ? 1 : 0 })).filter((x) => BYID[x.id]) : []);
     function cleanTrade(b, num) {
@@ -82,7 +82,7 @@
     }
     async function refresh() {
       const c = conf(); let all = [];
-      for (let page = 1; page <= 5; page++) {
+      for (let page = 1; page <= 20; page++) {
         const r = await gh('GET', `/repos/${c.repo}/issues?state=open&per_page=100&page=${page}`);
         all = all.concat(r.filter((i) => !i.pull_request)); if (r.length < 100) break;
       }
@@ -154,9 +154,10 @@
       const s = S(), p = s.profile, cards = {};
       Object.keys(s.cards).forEach((id) => { const e = s.cards[id]; if (BYID[id] && e.n > 0) cards[id] = [e.n, e.h || 0, e.f ? 1 : 0, e.t || 0, e.l || 0]; });
       return { t: 'player', v: 1, id: p.id, name: p.name, hue: p.hue, pfp: p.pfp, banner: p.banner, joined: p.joined, seen: Date.now(), opened: s.stats.opened, pulls: s.stats.pulls, cards: cards,
-        save: { packs: s.packs, last: s.last, sinceRare: s.sinceRare, started: s.started, stats: s.stats, codes: s.codes, net: s.net } };
+        save: { mod: s.mod || 0, packs: s.packs, last: s.last, sinceRare: s.sinceRare, started: s.started, stats: s.stats, codes: s.codes, net: s.net } };
     }
-    async function publish(force) {
+    // Uploads this device's save to the account's player issue. s.syncMod remembers which version the cloud holds, so a stale device can tell it must merge first.
+    async function publish(force, keep) {
       const s = S(), c = conf(), snap = build(), key = JSON.stringify(Object.assign({}, snap, { seen: 0 }));
       if (net.cfg.blocked.some((x) => x.id === s.profile.id)) return; // removed from the leaderboard by the admin
       const mine = net.dir.find(isMe);
@@ -164,14 +165,42 @@
       let body = JSON.stringify(snap);
       if (body.length > MAX_BODY) { delete snap.banner; body = JSON.stringify(snap); }
       if (body.length > MAX_BODY) { delete snap.pfp; body = JSON.stringify(snap); }
+      if (body.length > MAX_BODY) { snap.save.net = { out: s.net.out, done: {}, q: s.net.q, hist: [], miss: s.net.miss }; body = JSON.stringify(snap); }
       const title = `player:${s.profile.id} ${s.profile.name}`.replace(/[\r\n]+/g, ' ');
-      if (mine) await gh('PATCH', `/repos/${c.repo}/issues/${mine.num}`, { title: title, body: body });
+      if (mine) await gh('PATCH', `/repos/${c.repo}/issues/${mine.num}`, { title: title, body: body }, keep);
       else if (Date.now() - net.createdAt > 120000) {
         try { await gh('POST', `/repos/${c.repo}/issues`, { title: title, body: body, labels: ['player'] }); }
         catch (e) { if (e.status === 422) await gh('POST', `/repos/${c.repo}/issues`, { title: title, body: body }); else throw e; }
         net.createdAt = Date.now();
-      }
+      } else return;
       net.lastKey = key; net.lastBeat = Date.now();
+      s.syncMod = snap.save.mod; delete s.overwrite; ctx.save(true);
+      if (mine) mine.mod = snap.save.mod;
+    }
+    // If another device uploaded a newer save than the one this device last synced, bring it in (merging when this device also has new changes) before uploading.
+    function reconcile() {
+      const s = S(), mine = net.dir.find(isMe);
+      if (ctx.busy() || s.overwrite || !mine || !mine.full) return false;
+      const cm = mine.mod || 0;
+      if (cm <= (s.syncMod || 0)) return false;
+      const localChanged = (s.mod || 0) > (s.syncMod || 0) || (!s.mod && !s.syncMod && Object.keys(s.cards).length > 0);
+      ctx.mergeCloud(mine, localChanged || !mine.raw);
+      return true;
+    }
+    // Upload soon after any change instead of waiting for the next 60 second cycle.
+    let touchT = 0;
+    function touch() {
+      if (!enabled()) return; clearTimeout(touchT);
+      const go = () => { if (net.busy) { touchT = setTimeout(go, 800); return; } cycle(true); };
+      touchT = setTimeout(go, 2500);
+    }
+    // The tab is closing or going to the background: push anything not yet uploaded.
+    function flush() {
+      try {
+        const s = S(); if (!enabled() || !ctx.loggedIn() || ctx.busy() || (s.mod || 0) <= (s.syncMod || 0)) return;
+        const mine = net.dir.find(isMe); if (!mine) return;
+        publish(true, true).catch(() => {});
+      } catch (e) { /* ignore */ }
     }
 
     // ---------- trading ----------
@@ -253,22 +282,23 @@
     const toast = (m, err) => ctx.toast(m, err);
 
     // ---------- sync loop ----------
-    let changedFlag = false;
+    let changedFlag = false, pendingForce = false;
     async function cycle(force) {
-      if (net.busy) return; net.busy = true; changedFlag = false;
+      if (net.busy) { if (force) pendingForce = true; return; } net.busy = true; changedFlag = false;
       try {
         if (!enabled()) { await fallback(); net.status = 'off'; net.msg = ''; }
         else {
           await refresh(); changedFlag = settle(); if (changedFlag) ctx.save();
-          await flushQ(); if (S().settings.share && ctx.loggedIn()) await publish(force);
+          await flushQ(); if (ctx.loggedIn()) { if (reconcile()) changedFlag = true; await publish(force); }
           net.status = 'ok'; net.msg = '';
         }
       } catch (e) { net.status = 'err'; net.msg = e.message || 'Sync failed'; }
       if (net.cfgChanged) { changedFlag = true; net.cfgChanged = false; }
       net.busy = false; paint(); repaint(changedFlag); if (ctx.onSync) ctx.onSync();
+      if (pendingForce) { pendingForce = false; setTimeout(() => cycle(true), 50); }
     }
     function statusText() {
-      if (net.status === 'ok') return `Online · synced ${Math.max(0, Math.round((Date.now() - net.last) / 1000))}s ago${S().settings.share ? '' : ' · not sharing your profile'}`;
+      if (net.status === 'ok') return `Online · synced ${Math.max(0, Math.round((Date.now() - net.last) / 1000))}s ago`;
       if (net.status === 'err') return 'Sync problem: ' + net.msg;
       return conf().repo ? 'Read-only: add a GitHub token in Settings to appear on the leaderboard and trade.' : 'Offline: no GitHub repo detected (set one in Settings).';
     }
@@ -281,14 +311,14 @@
     function repaint(changed) {
       if ($('.modal-bg') || ctx.busy() || !ctx.loggedIn()) return;
       const h = location.hash.slice(1) || 'home';
-      if (h === 'players') drawPlayers(); else if (h === 'trades') drawTrades(); else if (h.indexOf('user-') === 0) ctx.route();
+      if (h === 'leaderboard' || h === 'players') drawPlayers(); else if (h === 'trades') drawTrades(); else if (h.indexOf('user-') === 0) ctx.route();
       else if (changed && h !== 'options' && h !== 'admin') ctx.route();
     }
 
     // ---------- pages ----------
     const SORTS = [['score', 'Score'], ['unique', 'Unique cards'], ['opened', 'Packs opened'], ['skibidi', 'Skibidi cards'], ['seen', 'Recently online']];
     function pagePlayers() {
-      $('#main').innerHTML = `<h1>Players</h1><p class="muted" id="plstatus"></p>
+      $('#main').innerHTML = `<h1>Leaderboard</h1><p class="muted" id="plstatus"></p>
         <div class="filters panel"><label class="f">Find a player<input id="plq" type="search" value="${esc(view.q)}" placeholder="Name or ID" autocomplete="off"></label>
         <label class="f">Rank by<select id="plsort">${SORTS.map(([v, l]) => `<option value="${v}" ${view.by === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div><div id="pllist"></div>`;
       $('#plq').oninput = (e) => { view.q = e.target.value; drawPlayers(); };
@@ -308,9 +338,9 @@
     }
     function pageUser(id) {
       const p = net.dir.find((x) => x.id === id);
-      if (!p) { $('#main').innerHTML = `<div class="empty"><h2>${net.loaded ? 'Player not found' : 'Loading...'}</h2><p><a class="btn" href="#players">← All players</a></p></div>`; if (!net.loaded || Date.now() - net.last > 20000) cycle(); return; }
-      const me = isMe(p), can = enabled() && !me && p.full && S().settings.share;
-      const actions = `<a class="btn" href="#players">← Players</a>${me ? '<button class="btn" data-act="edit-profile">✎ Edit profile</button>' : ''}${can ? `<button class="btn primary" data-net="trade" data-id="${p.id}">⇄ Trade with ${esc(p.name)}</button>` : ''}`;
+      if (!p) { $('#main').innerHTML = `<div class="empty"><h2>${net.loaded ? 'Player not found' : 'Loading...'}</h2><p><a class="btn" href="#leaderboard">← Leaderboard</a></p></div>`; if (!net.loaded || Date.now() - net.last > 20000) cycle(); return; }
+      const me = isMe(p), can = enabled() && !me && p.full;
+      const actions = `<a class="btn" href="#leaderboard">← Leaderboard</a>${me ? '<button class="btn" data-act="edit-profile">✎ Edit profile</button>' : ''}${can ? `<button class="btn primary" data-net="trade" data-id="${p.id}">⇄ Trade with ${esc(p.name)}</button>` : ''}`;
       $('#main').innerHTML = ctx.profileHTML(p, p.cards, { opened: p.opened }, actions, true, { score: p.score, unique: p.unique, skibidi: p.skibidi, rarest: p.rarest, lite: !p.full, online: online(p) });
       $$('.card', $('#main')).forEach(ctx.tilt);
     }
@@ -337,7 +367,6 @@
       if (!enabled()) { toast('Add a GitHub token in Settings first', true); return; }
       const s = S(), others = net.dir.filter((p) => !isMe(p) && p.full);
       if (!others.length) { toast('No other players are online yet', true); return; }
-      if (!s.settings.share) { toast('Turn on sharing in Settings so others can answer you', true); return; }
       const st = { to: others.some((p) => p.id === pre) ? pre : others[0].id, give: {}, want: {} };
       const bg = ctx.modal(`<h2>New trade</h2><label class="f">Trade with<select id="trTo">${others.map((p) => `<option value="${p.id}" ${p.id === st.to ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
         <div class="tr-cols"><div><h3>You give <span class="muted small" id="trGn"></span></h3><div id="trGive" class="tr-pick"></div></div>
@@ -398,10 +427,11 @@
       });
       setInterval(() => { if (!document.hidden) cycle(); }, EVERY);
       document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - net.last > 15000) cycle(); });
+      addEventListener('pagehide', flush); document.addEventListener('visibilitychange', () => { if (document.hidden) flush(); });
       paint(); setTimeout(() => cycle(true), 600);
     }
     // The Online panel in Settings is switched off. Return settingsHTML/bindSettings below to bring it back (share toggle, own token, restore from cloud).
     const SHOW_SETTINGS = false;
-    return { gh: gh, conf: conf, enabled: enabled, refresh: refresh, updateConfig: updateConfig, saveCardImage: saveCardImage, closeIssue: closeIssue, createIssue: createIssue, loadCache: loadCache, start: start, paint: paint, cycle: cycle, pagePlayers: pagePlayers, pageUser: pageUser, pageTrades: pageTrades, settingsHTML: () => (SHOW_SETTINGS ? settingsHTML() : ''), bindSettings: () => { if (SHOW_SETTINGS) bindSettings(); }, state: net, build: build };
+    return { gh: gh, conf: conf, enabled: enabled, refresh: refresh, updateConfig: updateConfig, saveCardImage: saveCardImage, closeIssue: closeIssue, createIssue: createIssue, loadCache: loadCache, start: start, touch: touch, paint: paint, cycle: cycle, pagePlayers: pagePlayers, pageUser: pageUser, pageTrades: pageTrades, settingsHTML: () => (SHOW_SETTINGS ? settingsHTML() : ''), bindSettings: () => { if (SHOW_SETTINGS) bindSettings(); }, state: net, build: build };
   };
 })();

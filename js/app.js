@@ -19,7 +19,7 @@
   const KEY = 'ss-gacha-save-v1';
   let memorySave = null; // used if localStorage is blocked
   function fresh() {
-    return { v: 1, started: false, diff: 'sigma', packs: DIFFS.sigma.start, last: Date.now(), sinceRare: 0, cards: {},
+    return { v: 1, mod: 0, syncMod: 0, started: false, diff: 'sigma', packs: DIFFS.sigma.start, last: Date.now(), sinceRare: 0, cards: {},
       stats: { opened: 0, pulls: 0 }, settings: { sound: true, volume: 0.6, motion: true, monster: false, share: true },
       // The "fake account": lives in the save file. id is random and only there so a leaderboard can tell players apart later.
       profile: { id: uid(), name: 'Player', pfp: null, banner: null, hue: 28, joined: Date.now() }, codes: [], account: null,
@@ -36,6 +36,7 @@
     const times = Object.values(s.cards || {}).map((e) => e && e.t).filter(Boolean);
     s.profile = { id: String(jp.id || f.profile.id).slice(0, 40), name: String(jp.name || 'Player').slice(0, 20), pfp: okImg(jp.pfp), banner: okImg(jp.banner),
       hue: Number.isFinite(+jp.hue) ? ((+jp.hue % 360) + 360) % 360 : 28, joined: +jp.joined || (times.length ? Math.min.apply(null, times) : Date.now()) };
+    s.mod = +j.mod || 0; s.syncMod = +j.syncMod || 0; s.settings.share = true; // sharing is always on now: the account save depends on it
     s.codes = Array.isArray(j.codes) ? j.codes.map(String) : [];
     s.account = typeof j.account === 'string' && j.account ? j.account.slice(0, 20) : null;
     const jn = (j && j.net) || {};
@@ -49,7 +50,12 @@
     return fresh();
   }
   let S = load();
-  function save() { const j = JSON.stringify(S); try { localStorage.setItem(KEY, j); } catch (e) { memorySave = j; } }
+  // passive = a save that is not a player change (pack timer ticks). Real changes stamp S.mod, which is how the online sync tells which copy is newer,
+  // and ask the online layer to upload soon so nothing waits for the next 60 second cycle.
+  function save(passive) {
+    if (passive !== true) { S.mod = Math.max(Date.now(), (S.mod || 0) + 1); if (net && auth && auth.loggedIn()) net.touch(); }
+    const j = JSON.stringify(S); try { localStorage.setItem(KEY, j); } catch (e) { memorySave = j; }
+  }
   const D = () => DIFFS.sigma;
   const CARDS_PER_PACK = 5;
 
@@ -58,7 +64,7 @@
     const d = D(), now = Date.now(), iv = d.interval * 60000;
     if (S.packs >= d.cap) { S.last = now; return; }
     const n = Math.floor((now - S.last) / iv);
-    if (n > 0) { S.packs += Math.min(n, d.cap - S.packs); S.last += n * iv; if (S.packs >= d.cap) S.last = now; save(); }
+    if (n > 0) { S.packs += Math.min(n, d.cap - S.packs); S.last += n * iv; if (S.packs >= d.cap) S.last = now; save(true); }
   }
   function weights(d, forceRare) { return G.BASE_WEIGHTS.map((w, i) => (forceRare && i < 2 ? 0 : i >= 2 ? w * d.luck : w)); }
   function pickIdx(w) { let t = w.reduce((a, b) => a + b, 0), r = Math.random() * t; for (let i = 0; i < w.length; i++) { r -= w[i]; if (r < 0) return i; } return w.length - 1; }
@@ -175,15 +181,15 @@
   function closeModal(bg) { (bg || $$('.modal-bg').pop())?.remove(); if (!$('.modal-bg')) document.documentElement.classList.remove('modal-open'); }
 
   // ---------- header ----------
-  const NAV = [['home', 'Packs'], ['collection', 'Collection'], ['index', 'Index'], ['players', 'Players'], ['trades', 'Trades'], ['profile', 'Profile'], ['options', 'Settings']];
+  const NAV = [['home', 'Packs'], ['collection', 'Collection'], ['index', 'Index'], ['leaderboard', 'Leaderboard'], ['trades', 'Trades'], ['profile', 'Profile'], ['options', 'Settings']];
   let net = null, auth = null, admin = null; // the online layer (js/net.js), accounts (js/auth.js) and admin (js/admin.js), created at the bottom
   const BOLT = '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M13.5 2 4 13.5h6.2L8.5 22 20 9.8h-6.6z" fill="currentColor"/></svg>';
   function renderHeader() {
     if (!auth || !auth.loggedIn()) { $('#header').innerHTML = `<a class="logo" href="#home">${BOLT}<span>Special Strike <b>Gacha</b></span></a>`; return; }
-    const cur0 = (location.hash.slice(1) || 'home').split('-')[0], cur = cur0 === 'user' ? 'players' : cur0;
+    const cur0 = (location.hash.slice(1) || 'home').split('-')[0], cur = cur0 === 'user' ? 'leaderboard' : cur0 === 'players' ? 'leaderboard' : cur0;
     $('#header').innerHTML = `<a class="logo" href="#home">${BOLT}<span>Special Strike <b>Gacha</b></span></a>
       <nav class="main" aria-label="Main">${NAV.map(([h, l]) => `<a href="#${h}" ${cur === h ? 'aria-current="page"' : ''}>${l}${h === 'trades' ? '<span class="nbadge" data-tradebadge hidden></span>' : ''}</a>`).join('')}</nav>
-      <div class="top-right"><button class="btn sm" data-act="redeem" title="Enter a pack code">🎁 Code</button><button class="btn sm" data-act="copy-save" title="Copy your save to the clipboard">💾 Copy save</button><a class="chip" href="#home" title="Packs ready"><span class="pk"></span><b data-hud="packs">${S.packs}</b></a>
+      <div class="top-right"><button class="btn sm" data-act="redeem" title="Enter a pack code">🎁 Code</button><a class="chip" href="#home" title="Packs ready"><span class="pk"></span><b data-hud="packs">${S.packs}</b></a>
         <a class="me" href="#profile" title="${esc(S.profile.name)}">${avatarHTML(32)}<i class="netdot" data-netdot></i></a>
         <button class="icon-btn" data-act="toggle-sound" aria-label="Sound ${S.settings.sound ? 'on' : 'off'}" title="Sound">${S.settings.sound ? '🔊' : '🔇'}</button></div>`;
     if (net) net.paint();
@@ -421,22 +427,14 @@
         <label class="check"><input id="optSound" type="checkbox" ${S.settings.sound ? 'checked' : ''}> Sound effects</label>
         <label class="f inline">Volume<input id="optVol" type="range" min="0" max="1" step="0.05" value="${S.settings.volume}"></label>
         <label class="check"><input id="optMotion" type="checkbox" ${S.settings.motion ? 'checked' : ''}> Animations</label></div></section>
-      <section class="panel"><h2>Save file</h2><p class="muted small">Your progress lives in this browser only. Clearing site data or switching browsers loses it, so keep a backup.</p>
-        <div class="row wrap"><button class="btn primary" data-act="copy-save">Copy save</button><button class="btn" data-act="download-save">Download save</button></div>
-        <h3 style="margin:18px 0 8px">Restore a save</h3><textarea id="importText" rows="3" style="width:100%" placeholder="Paste a save code here"></textarea>
-        <div class="row wrap" style="margin-top:8px"><button class="btn" data-act="import-save">Import pasted code</button><label class="btn" style="cursor:pointer">Import from file<input id="importFile" type="file" accept=".txt,.json" hidden></label></div></section>
       <section class="panel"><h2>The Monster 👹</h2><label class="check"><input id="optMonster" type="checkbox" ${S.settings.monster ? 'checked' : ''}> Let the monster in</label><p class="muted small">Each pack you open has a 25% chance that the monster eats one random card from it. Eaten cards are gone for good and never reach your collection. But with the monster in, packs can also contain ${G.MONSTER_POOL.length} special cards that can't be found any other way (about ${Math.round(G.MONSTER_CHANCE * 100)}% per card slot).</p></section>
       ${net ? net.settingsHTML() : ''}
       ${auth ? auth.settingsHTML() : ''}
       ${admin ? admin.settingsHTML() : ''}
-      <section class="panel"><h2>Save data</h2><p class="muted small">Your progress is stored in this browser. Copy the code to move it to another device, or paste one to restore it.</p>
-        <textarea id="saveBox" rows="3" spellcheck="false" aria-label="Save code" placeholder="Save code"></textarea>
-        <div class="row wrap"><button class="btn" data-act="export">Show my save code</button><button class="btn" data-act="copy-save">Copy</button><button class="btn" data-act="import">Load this code</button></div></section>
       <section class="panel danger-zone"><h2>Reset</h2><p class="muted small">Deletes all your cards and stats.</p><button class="btn danger" data-act="reset">Reset everything</button></section>`;
     $('#optSound').onchange = (e) => { S.settings.sound = e.target.checked; applyAudio(); save(); renderHeader(); };
     $('#optVol').oninput = (e) => { S.settings.volume = +e.target.value; applyAudio(); save(); };
     $('#optMotion').onchange = (e) => { S.settings.motion = e.target.checked; save(); };
-    $('#importFile').onchange = async (e) => { const f = e.target.files[0]; if (f) importSave(await f.text()); };
     if (net) net.bindSettings();
     if (auth) auth.bindSettings();
     if (admin) admin.bindSettings();
@@ -571,17 +569,11 @@
       case 'open-all': SFX.click(); openPacks(S.packs); break;
       case 'card': SFX.click(); cardModal(id); break;
       case 'home-tab': homeTab = t.dataset.tab; refreshHomeTabs(); break;
-      case 'copy-save': copySave(); break;
       case 'redeem': redeemModal(); break;
       case 'edit-profile': editProfile(); break;
-      case 'download-save': downloadSave(); break;
-      case 'import-save': importSave(($('#importText') || {}).value || ''); break;
       case 'fav': { const x = S.cards[id]; if (x) { x.f = x.f ? 0 : 1; save(); closeModal(); cardModal(id); route(); } break; }
-      case 'export': try { $('#saveBox').value = btoa(unescape(encodeURIComponent(JSON.stringify(S)))); } catch (er) { toast('Could not make a save code', true); } break;
-      case 'copy-save': { const b = $('#saveBox'); if (!b.value) $('[data-act="export"]').click(); b.select(); try { await navigator.clipboard.writeText(b.value); toast('Save code copied'); } catch (er) { document.execCommand && document.execCommand('copy'); toast('Select and copy the code'); } break; }
-      case 'import': try { const j = JSON.parse(decodeURIComponent(escape(atob($('#saveBox').value.trim())))); if (!j || !j.cards) throw 0; S = normalize(j); save(); renderHeader(); toast('Save loaded'); pageSettings(); } catch (er) { toast('That is not a valid save code', true); } break;
       case 'reset': if (!t.dataset.sure) { t.dataset.sure = 1; t.textContent = 'Press again to erase everything'; setTimeout(() => { if (t.isConnected) { delete t.dataset.sure; t.textContent = 'Reset everything'; } }, 4000); break; }
-        { const keep = { a: S.account, id: S.profile.id, n: S.profile.name }; S = fresh(); S.account = keep.a; S.profile.id = keep.id; S.profile.name = keep.n; } save(); renderHeader(); route(); toast('Save reset'); break;
+        { const keep = { a: S.account, id: S.profile.id, n: S.profile.name }; S = fresh(); S.account = keep.a; S.profile.id = keep.id; S.profile.name = keep.n; S.overwrite = true; } save(); renderHeader(); route(); toast('Save reset'); break;
     }
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { const m = $$('.modal-bg').pop(); if (m && !$('.welcome', m)) closeModal(m); } });
@@ -601,26 +593,7 @@
     });
   })();
 
-  // ---------- save backup + close warning ----------
-  const exportCode = () => btoa(unescape(encodeURIComponent(JSON.stringify(S))));
-  async function copySave() {
-    const code = exportCode();
-    try { await navigator.clipboard.writeText(code); toast('Save copied. Paste it somewhere safe.'); } catch (e) { window.prompt('Copy your save code (Ctrl+C), then keep it somewhere safe:', code); }
-  }
-  function downloadSave() {
-    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([exportCode()], { type: 'text/plain' })); a.download = 'special-strike-save.txt';
-    document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1500); toast('Save file downloaded');
-  }
-  function importSave(text) {
-    try {
-      text = String(text).trim(); let j;
-      try { j = JSON.parse(text); } catch (e) { j = JSON.parse(decodeURIComponent(escape(atob(text)))); }
-      if (!j || typeof j.cards !== 'object' || !j.stats) throw new Error('bad');
-      if (!window.confirm('Replace your current progress with this save?')) return;
-      localStorage.setItem(KEY, JSON.stringify(Object.assign({}, j, { account: S.account || null, profile: Object.assign({}, j.profile || {}, { id: S.profile.id }) }))); location.reload();
-    } catch (e) { toast('That does not look like a valid save.', true); }
-  }
-  const PAGES = { home: pageHome, collection: pageCollection, index: pageIndex, players: () => net.pagePlayers(), trades: () => net.pageTrades(), profile: pageProfile, options: pageSettings, admin: () => admin.page() };
+  const PAGES = { home: pageHome, collection: pageCollection, index: pageIndex, leaderboard: () => net.pagePlayers(), players: () => net.pagePlayers(), trades: () => net.pageTrades(), profile: pageProfile, options: pageSettings, admin: () => admin.page() };
   function route() {
     if (!auth.loggedIn()) { renderHeader(); auth.page(); document.title = 'Sign in · Special Strike Gacha'; return; }
     const h = (location.hash.slice(1) || 'home'), fn = h.indexOf('user-') === 0 ? () => net.pageUser(h.slice(5)) : (PAGES[h] || pageHome);
@@ -634,7 +607,25 @@
   const ctx = { G, S: () => S, save, toast, modal, closeModal, esc, $, $$, cardHTML, tilt, avatarHTML, bannerCSS, profileHTML, route, renderHeader, fmt, uid, normalize, hasCopy, takeCopy, addCopy, busy: () => opening,
     restore: (j) => { S = normalize(Object.assign({}, j, { account: S.account || null })); save(); location.reload(); },
     loggedIn: () => !!(auth && auth.loggedIn()), onSync: () => { if (auth) auth.watch(); },
-    fresh, adopt: (j) => { S = normalize(j); save(); }, rerenderSettings: () => pageSettings() };
+    fresh, adopt: (j) => { S = normalize(j); save(true); }, rerenderSettings: () => pageSettings(),
+    // Bring the account's newer cloud save in. keepLocal = this device has changes the cloud has not seen, so combine instead of replace (never loses a card).
+    mergeCloud: (p, keepLocal) => {
+      const cc = {}; Object.keys(p.cards).forEach((id) => { const c = p.cards[id]; cc[id] = { n: c.n, h: c.h, f: c.f, t: c.t, l: c.l }; });
+      const raw = p.raw || {}, prof = { id: p.id, name: p.name, hue: p.hue, pfp: p.pfp, banner: p.banner, joined: p.joined };
+      let next;
+      if (!keepLocal) { next = Object.assign(fresh(), raw, { cards: cc, profile: prof, settings: Object.assign({}, S.settings), account: S.account }); next.mod = next.syncMod = p.mod; }
+      else {
+        next = JSON.parse(JSON.stringify(S));
+        Object.keys(cc).forEach((id) => { const a = next.cards[id], b = cc[id];
+          if (!a) next.cards[id] = b; else { a.n = Math.max(a.n, b.n); a.h = Math.min(a.n, Math.max(a.h || 0, b.h || 0)); a.f = a.f || b.f ? 1 : 0; a.t = Math.min(a.t || b.t, b.t || a.t); a.l = Math.max(a.l || 0, b.l || 0); } });
+        const cloudNewer = p.mod > (S.mod || 0);
+        next.codes = Array.from(new Set((next.codes || []).concat(raw.codes || [])));
+        next.stats = { opened: Math.max(S.stats.opened, +(raw.stats && raw.stats.opened) || 0), pulls: Math.max(S.stats.pulls, +(raw.stats && raw.stats.pulls) || 0) };
+        if (cloudNewer) { ['packs', 'last', 'sinceRare', 'started'].forEach((k) => { if (raw[k] != null) next[k] = raw[k]; }); if (raw.net) next.net = Object.assign({}, raw.net, { done: Object.assign({}, S.net.done, raw.net.done || {}) }); next.profile = Object.assign({}, S.profile, prof); }
+        next.syncMod = p.mod; next.mod = Math.max(Date.now(), p.mod + 1);
+      }
+      S = normalize(next); save(true); renderHeader(); if (!opening) route();
+    } };
   net = window.SSGNet(ctx);
   auth = window.SSGAuth(Object.assign({}, ctx, { net }));
   admin = window.SSGAdmin(Object.assign({}, ctx, { net }));

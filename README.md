@@ -19,12 +19,13 @@ Everything online runs through GitHub Issues, so there is no server. The game wo
    - Personal: each player pastes their own token in Settings > Online.
 4. Move `.github/workflows/leaderboard.yml` to the repo's top-level `.github/workflows/` if your site is in a subfolder (and set its `working-directory`). It refreshes `data/leaderboard.json` every 15 minutes, which is what people without a token see.
 
-What it does: while the site is open it publishes your profile and collection to your own "player:..." issue about every 60 seconds. The Players page lists everyone, with search and profiles. Trades are "trade:..." issues; the offered cards are held until the other player answers.
+What it does: while the site is open it publishes your profile and collection to your own "player:..." issue about every 60 seconds. The Leaderboard page lists everyone, with search and profiles. Trades are "trade:..." issues; the offered cards are held until the other player answers.
 Anyone with the token can edit any issue, so this is built for friends, not for security.
 
 ## Accounts (sign in / sign up)
 Nobody can play until they are signed in (`js/auth.js`). Accounts use the same GitHub Issues setup as the leaderboard, so the online setup above must be working.
 - Each account is an issue titled `account:<username>` holding the username, a salt and a PBKDF2 hash of the password. The password itself is never stored.
+- Your save uploads to your account a few seconds after every change (and when you close the tab). Signing in on a new device, or after clearing site data, loads it back. If two devices changed things, the saves are merged and no card is lost.
 - Players who already had progress keep it: when they create an account on their device, that save becomes the account's save. Signing in on another device loads the account's last published save.
 - Limits: this is a client-side gate, and the hashes are readable by anyone who can read the repo's issues. Fine for a friends game, not for anything sensitive.
 
