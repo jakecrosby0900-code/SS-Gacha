@@ -1,5 +1,5 @@
 {
- "updated": 1794953211036,
+ "updated": 1794953305973,
  "players": [
   {
    "id": "mwl6d0nyb6w3i0",
@@ -7,12 +7,12 @@
    "hue": 28,
    "pfp": null,
    "joined": 1794952301738,
-   "seen": 1794953152732,
-   "opened": 10,
-   "score": 85,
-   "unique": 27,
-   "skibidi": 0,
-   "rarest": "Bugtrap"
+   "seen": 1794953301536,
+   "opened": 511,
+   "score": 1271,
+   "unique": 64,
+   "skibidi": 25,
+   "rarest": "Redacted"
   }
  ]
 }
