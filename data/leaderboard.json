@@ -1,5 +1,5 @@
 {
- "updated": 1794940281913,
+ "updated": 1794941153811,
  "players": [
   {
    "id": "mwjvvhk77bm0c3",
@@ -13,6 +13,19 @@
    "unique": 51,
    "skibidi": 3,
    "rarest": "Redacted"
+  },
+  {
+   "id": "mwl139bxwqzcw2",
+   "name": "sgs girlfriend",
+   "hue": 268,
+   "pfp": null,
+   "joined": 1794940266237,
+   "seen": 1794940880993,
+   "opened": 23,
+   "score": 144,
+   "unique": 38,
+   "skibidi": 3,
+   "rarest": "Bon"
   },
   {
    "id": "mwkx487ox8yl1m",
@@ -80,12 +93,12 @@
    "rarest": null
   },
   {
-   "id": "mwl139bxwqzcw2",
+   "id": "mwl1l0qhia3gyr",
    "name": "Player",
    "hue": 28,
    "pfp": null,
-   "joined": 1794940266237,
-   "seen": 1794940267368,
+   "joined": 1794941094905,
+   "seen": 1794941140895,
    "opened": 0,
    "score": 0,
    "unique": 0,
