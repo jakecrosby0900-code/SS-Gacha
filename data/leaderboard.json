@@ -1,5 +1,5 @@
 {
- "updated": 1794954778024,
+ "updated": 1794954870760,
  "players": [
   {
    "id": "mwl6d0nyb6w3i0",
@@ -7,12 +7,12 @@
    "hue": 28,
    "pfp": null,
    "joined": 1794952301738,
-   "seen": 1794954754510,
+   "seen": 1794954866278,
    "opened": 0,
-   "score": 0,
-   "unique": 0,
-   "skibidi": 0,
-   "rarest": null
+   "score": 566,
+   "unique": 38,
+   "skibidi": 1,
+   "rarest": "Split Sparky Doo"
   },
   {
    "id": "mwl9ialqb6eanb",
@@ -20,12 +20,12 @@
    "hue": 28,
    "pfp": null,
    "joined": 1794954407111,
-   "seen": 1794954741462,
-   "opened": 0,
-   "score": 0,
-   "unique": 0,
+   "seen": 1794954805346,
+   "opened": 10,
+   "score": 348,
+   "unique": 27,
    "skibidi": 0,
-   "rarest": null
+   "rarest": "SS3 RXQ"
   }
  ]
 }
