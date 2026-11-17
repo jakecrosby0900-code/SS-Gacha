@@ -1,5 +1,5 @@
 {
- "updated": 1794941522071,
+ "updated": 1794948068212,
  "players": [
   {
    "id": "mwjvvhk77bm0c3",
@@ -7,25 +7,38 @@
    "hue": 28,
    "pfp": null,
    "joined": 1794866454265,
-   "seen": 1794941464844,
-   "opened": 64,
-   "score": 673,
-   "unique": 53,
+   "seen": 1794948059999,
+   "opened": 73,
+   "score": 798,
+   "unique": 54,
    "skibidi": 3,
    "rarest": "Redacted"
   },
   {
-   "id": "mwl1q0jz4o700f",
-   "name": "jaspag",
+   "id": "mwkjswb13oaas3",
+   "name": "Player",
    "hue": 28,
    "pfp": null,
-   "joined": 1794941327951,
-   "seen": 1794941518745,
+   "joined": 1794866371605,
+   "seen": 1794948052838,
+   "opened": 31,
+   "score": 637,
+   "unique": 46,
+   "skibidi": 4,
+   "rarest": "Fazgirl"
+  },
+  {
+   "id": "mwjyzy3urnzxgk",
+   "name": "Player",
+   "hue": 28,
+   "pfp": null,
+   "joined": 1794876286314,
+   "seen": 1794948051953,
    "opened": 23,
-   "score": 310,
-   "unique": 42,
-   "skibidi": 0,
-   "rarest": "The Chud"
+   "score": 297,
+   "unique": 41,
+   "skibidi": 1,
+   "rarest": "Revived Glitchtrap"
   },
   {
    "id": "mwl1p42o18racq",
@@ -39,6 +52,19 @@
    "unique": 26,
    "skibidi": 1,
    "rarest": "Shadowtrap"
+  },
+  {
+   "id": "mwl1q0jz4o700f",
+   "name": "jaspigga",
+   "hue": 28,
+   "pfp": null,
+   "joined": 1794941327951,
+   "seen": 1794941582154,
+   "opened": 23,
+   "score": 185,
+   "unique": 41,
+   "skibidi": 0,
+   "rarest": "Bon"
   },
   {
    "id": "mwl1l0qhia3gyr",
@@ -72,11 +98,11 @@
    "hue": 28,
    "pfp": null,
    "joined": 1794933592980,
-   "seen": 1794938985534,
-   "opened": 11,
-   "score": 94,
-   "unique": 27,
-   "skibidi": 2,
+   "seen": 1794947797998,
+   "opened": 21,
+   "score": 121,
+   "unique": 36,
+   "skibidi": 4,
    "rarest": "Mighty Jimmy"
   },
   {
