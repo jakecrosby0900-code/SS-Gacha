@@ -342,6 +342,8 @@
       document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - net.last > 15000) cycle(); });
       paint(); setTimeout(() => cycle(true), 600);
     }
-    return { start: start, paint: paint, cycle: cycle, pagePlayers: pagePlayers, pageUser: pageUser, pageTrades: pageTrades, settingsHTML: settingsHTML, bindSettings: bindSettings, state: net, build: build };
+    // The Online panel in Settings is switched off. Return settingsHTML/bindSettings below to bring it back (share toggle, own token, restore from cloud).
+    const SHOW_SETTINGS = false;
+    return { start: start, paint: paint, cycle: cycle, pagePlayers: pagePlayers, pageUser: pageUser, pageTrades: pageTrades, settingsHTML: () => (SHOW_SETTINGS ? settingsHTML() : ''), bindSettings: () => { if (SHOW_SETTINGS) bindSettings(); }, state: net, build: build };
   };
 })();
