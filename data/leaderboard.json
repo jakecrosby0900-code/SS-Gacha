@@ -1,5 +1,5 @@
 {
- "updated": 1794954530353,
+ "updated": 1794954559676,
  "players": [
   {
    "id": "mwl9ialqb6eanb",
@@ -7,10 +7,10 @@
    "hue": 28,
    "pfp": null,
    "joined": 1794954407111,
-   "seen": 1794954503660,
+   "seen": 1794954555418,
    "opened": 23,
-   "score": 299,
-   "unique": 41,
+   "score": 307,
+   "unique": 42,
    "skibidi": 2,
    "rarest": "The Mimic"
   },
@@ -20,10 +20,10 @@
    "hue": 28,
    "pfp": null,
    "joined": 1794952301738,
-   "seen": 1794954524685,
+   "seen": 1794954558183,
    "opened": 1,
-   "score": 31,
-   "unique": 5,
+   "score": 23,
+   "unique": 4,
    "skibidi": 0,
    "rarest": "Bugtrap"
   }
