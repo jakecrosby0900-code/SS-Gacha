@@ -124,6 +124,46 @@
       });
     }
 
+    // Removing cards works the same way: a grant that carries a "take" list (or wipe = everything), applied by the player's own device.
+    function takeModal(acc) {
+      const p = st().dir.find((x) => x.id === acc.pid);
+      if (!p || !p.full || !Object.keys(p.cards).length) { toast(acc.u + ' has no cards saved online.', true); return; }
+      const pick = {}, tiles = [];
+      Object.keys(p.cards).sort((a, b) => G.BYID[a].rank - G.BYID[b].rank).forEach((id) => { const e = p.cards[id]; if (e.n - e.h > 0) tiles.push({ id: id, h: 0, n: e.n - e.h }); if (e.h > 0) tiles.push({ id: id, h: 1, n: e.h }); });
+      const bg = ctx.modal(`<h2>Remove cards from ${esc(acc.u)}</h2>
+        <label class="f">Find a card<input id="tkQ" type="search" placeholder="Card name" autocomplete="off"></label>
+        <p class="muted small">Click a card to mark one copy for removal (click again for more). This is what they had at their last upload.</p>
+        <div id="tkList" class="ad-pick" style="max-height:260px"></div>
+        <h3 style="margin:12px 0 6px">To remove</h3><div id="tkPick" class="ad-pick"></div>
+        <div class="row wrap" style="margin-top:14px"><button class="btn primary" id="tkGo" type="button">Remove selected</button><button class="btn danger" id="tkAll" type="button">Remove ALL their cards</button><button class="btn" data-act="close-modal" type="button">Cancel</button></div>`, 'wide');
+      const draw = () => {
+        const f = $('#tkQ', bg).value.trim().toLowerCase(), list = tiles.filter((t) => !f || G.BYID[t.id].name.toLowerCase().includes(f));
+        $('#tkList', bg).innerHTML = list.map((t) => { const k = t.id + '|' + t.h; return `<button type="button" class="btn sm" data-tk="${esc(k)}">${esc(G.BYID[t.id].name)}${t.h ? ' (skibidi)' : ''} <small class="muted">own ${t.n}</small></button>`; }).join('') || '<span class="muted small">No cards match.</span>';
+        const ks = Object.keys(pick);
+        $('#tkPick', bg).innerHTML = ks.length ? ks.map((k) => { const [id, h] = k.split('|'); return `<button type="button" class="btn sm danger" data-tx="${esc(k)}" title="Click to undo one">${esc(G.BYID[id].name)}${h === '1' ? ' (skibidi)' : ''} ×${pick[k]}</button>`; }).join('') : '<span class="muted small">Nothing marked.</span>';
+      };
+      draw(); $('#tkQ', bg).oninput = draw;
+      bg.addEventListener('click', (e) => {
+        const a = e.target.closest('[data-tk]'), x = e.target.closest('[data-tx]');
+        if (a) { const k = a.dataset.tk, t = tiles.find((y) => y.id + '|' + y.h === k); pick[k] = Math.min(t.n, (pick[k] || 0) + 1); draw(); }
+        else if (x) { const k = x.dataset.tx; if (--pick[k] <= 0) delete pick[k]; draw(); }
+      });
+      const send = async (body, msg) => {
+        const gid = ctx.uid().replace(/[^a-z0-9]/g, '');
+        await net.createIssue('grant:' + gid + ' ' + acc.k, Object.assign({ t: 'grant', v: 1, gid: gid, k: acc.k, cards: [], packs: 0, at: Date.now() }, body));
+        ctx.closeModal(bg); toast(msg);
+      };
+      $('#tkGo', bg).onclick = guard(async () => {
+        const take = Object.keys(pick).map((k) => { const [id, h] = k.split('|'); return { id: id, h: +h, n: pick[k] }; });
+        if (!take.length) { toast('Mark at least one card', true); return; }
+        await send({ take: take }, 'Done. The cards are removed the next time ' + acc.u + ' is online.');
+      });
+      $('#tkAll', bg).onclick = guard(async () => {
+        if (!window.confirm(`Remove EVERY card from ${acc.u}? They keep their packs. This cannot be undone.`)) return;
+        await send({ wipe: true }, 'Done. All cards are removed the next time ' + acc.u + ' is online.');
+      });
+    }
+
     // ---------- custom rarities and sets ----------
     const NAME_RE = /^[A-Za-z0-9 ]+$/;
     function tierEditor(name) {
@@ -253,7 +293,7 @@
         const p = byPid[a.pid], off = isBlocked(a.pid);
         const info = p ? `${ctx.fmt(p.score)} pts · ${p.unique} cards · ${p.opened} packs` : 'Nothing saved online yet';
         return `<div class="ad-row">${p ? ctx.avatarHTML(34, p) : ''}<span class="ad-main"><b>${esc(a.u)}</b>${p && p.name !== a.u ? ` <small class="muted">(${esc(p.name)})</small>` : ''}<small class="muted">${info}${off ? ' · <b>removed from leaderboard</b>' : ''}</small></span>
-          <button class="btn sm" data-ad-give="${esc(a.k)}" type="button">Give</button>
+          <button class="btn sm" data-ad-give="${esc(a.k)}" type="button">Give</button><button class="btn sm" data-ad-take="${esc(a.k)}" type="button">Take</button>
           ${off ? `<button class="btn sm" data-ad-restore="${esc(a.pid)}" type="button">Restore</button>` : `<button class="btn sm" data-ad-rm="${esc(a.pid)}" data-name="${esc(a.u)}" type="button">Remove</button>`}
           <button class="btn sm danger" data-ad-acc="${esc(a.k)}" type="button">Delete</button></div>`;
       };
@@ -281,11 +321,12 @@
       $('#adCat').onchange = (e) => { view.cat = e.target.value; redraw(); };
       $$('#adCards .card').forEach(ctx.tilt);
       $('#main').onclick = (e) => {
-        const t = e.target.closest('[data-ad-card],[data-ad-rm],[data-ad-restore],[data-ad-acc],[data-ad-give],[data-ad-tier],[data-ad-set]'); if (!t) return;
+        const t = e.target.closest('[data-ad-card],[data-ad-rm],[data-ad-restore],[data-ad-acc],[data-ad-give],[data-ad-take],[data-ad-tier],[data-ad-set]'); if (!t) return;
         if (t.dataset.adCard) cardEditor(t.dataset.adCard);
         else if (t.dataset.adRm) removePlayer(t.dataset.adRm, t.dataset.name || 'Player');
         else if (t.dataset.adRestore) restorePlayer(t.dataset.adRestore);
         else if (t.dataset.adGive) { const a = accounts.find((x) => x.k === t.dataset.adGive); if (a) giveModal(a); }
+        else if (t.dataset.adTake) { const a = accounts.find((x) => x.k === t.dataset.adTake); if (a) takeModal(a); }
         else if (t.dataset.adTier) tierEditor(t.dataset.adTier);
         else if (t.dataset.adSet) setEditor(t.dataset.adSet);
         else if (t.dataset.adAcc) { const a = accounts.find((x) => x.k === t.dataset.adAcc); if (a) deleteAccount(a); }

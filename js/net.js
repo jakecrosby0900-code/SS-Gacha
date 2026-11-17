@@ -98,7 +98,8 @@
         else if (b.t === 'cardimg' && typeof b.id === 'string') { const im = okImg(b.img); if (im && (imgNum[b.id] == null || num < imgNum[b.id])) { imgs[b.id] = im; imgNum[b.id] = num; } }
         else if (b.t === 'grant' && typeof b.gid === 'string' && /^[a-z0-9]{6,40}$/.test(b.gid) && typeof b.k === 'string') {
           const cs = Array.isArray(b.cards) ? b.cards.slice(0, 60).map((x) => ({ id: String(x && x.id), h: x && x.h ? 1 : 0, n: Math.min(99, Math.max(1, +(x && x.n) | 0 || 1)) })).filter((x) => BYID[x.id]) : [];
-          grants.push({ gid: b.gid, k: b.k.toLowerCase(), num: num, cards: cs, packs: Math.min(1000, Math.max(0, +b.packs | 0)), at: +b.at || 0 });
+          const tk = Array.isArray(b.take) ? b.take.slice(0, 120).map((x) => ({ id: String(x && x.id), h: x && x.h ? 1 : 0, n: Math.min(9999, Math.max(1, +(x && x.n) | 0 || 1)) })).filter((x) => BYID[x.id]) : [];
+          grants.push({ gid: b.gid, k: b.k.toLowerCase(), num: num, cards: cs, take: tk, wipe: !!b.wipe, packs: Math.min(1000, Math.max(0, +b.packs | 0)), at: +b.at || 0 });
         }
         else if (b.t === 'account' && typeof b.k === 'string' && /^[a-z0-9_]{3,20}$/.test(b.k) && typeof b.salt === 'string' && typeof b.hash === 'string' && idOk(b.pid)) {
           if (!accounts[b.k] || accounts[b.k].num > num) accounts[b.k] = { k: b.k, u: String(b.u || b.k).slice(0, 20), salt: b.salt.slice(0, 64), hash: b.hash.slice(0, 128), iter: +b.iter || 0, pid: b.pid, created: +b.created || 0, num: num };
@@ -223,17 +224,20 @@
         if (s.granted[g.gid]) return;
         g.cards.forEach((it) => { for (let i = 0; i < it.n; i++) ctx.addCopy(it.id, it.h); });
         if (g.packs) s.packs += g.packs;
+        if (g.wipe) { Object.keys(s.cards).forEach((id) => { delete s.cards[id]; }); hist('The admin removed all your cards.'); }
+        else if (g.take.length) { g.take.forEach((it) => { for (let i = 0; i < it.n; i++) { if (!ctx.takeCopy(it.id, it.h)) break; } }); hist('The admin removed: ' + g.take.map((it) => BYID[it.id].name + (it.h ? ' (skibidi)' : '') + (it.n > 1 ? ' x' + it.n : '')).join(', ') + '.'); }
         s.granted[g.gid] = Date.now(); any = true;
         const parts = g.cards.map((it) => BYID[it.id].name + (it.h ? ' (skibidi)' : '') + (it.n > 1 ? ' x' + it.n : '')); if (g.packs) parts.push(g.packs + ' pack' + (g.packs === 1 ? '' : 's'));
-        hist('The admin gave you: ' + (parts.join(', ') || 'a gift') + '.');
+        if (!g.wipe && !g.take.length) hist('The admin gave you: ' + (parts.join(', ') || 'a gift') + '.');
       });
       const ks = Object.keys(s.granted); if (ks.length > 300) ks.sort((a, b) => s.granted[a] - s.granted[b]).slice(0, ks.length - 300).forEach((k) => delete s.granted[k]);
-      if (any) { ctx.save(); toast('The admin sent you a gift! Check your collection.'); }
+      if (any) { ctx.save(); toast('The admin changed your collection.'); }
       return any;
     }
     async function closeGrants() {
       const s = S(), c = conf();
-      for (const g of net.grants.filter((x) => x.k === s.account && s.granted[x.gid] && !closedGrants[x.num])) { closedGrants[g.num] = 1; try { await gh('PATCH', `/repos/${c.repo}/issues/${g.num}`, { state: 'closed' }); } catch (e) { /* retried after a reload */ } }
+      // Removals stay open for 3 days so a second, out-of-date device also applies them instead of bringing the cards back.
+      for (const g of net.grants.filter((x) => x.k === s.account && s.granted[x.gid] && !closedGrants[x.num] && (!(x.wipe || x.take.length) || Date.now() - x.at > 259200000))) { closedGrants[g.num] = 1; try { await gh('PATCH', `/repos/${c.repo}/issues/${g.num}`, { state: 'closed' }); } catch (e) { /* retried after a reload */ } }
     }
     // Upload soon after any change instead of waiting for the next 60 second cycle.
     let touchT = 0;
