@@ -128,9 +128,12 @@
     // ---------- settings panel ----------
     function settingsHTML() {
       const s = session();
-      return s ? `<section class="panel"><h2>Account 👤</h2><p class="muted small">Signed in as <b>${esc(s.u)}</b>.</p><div class="row wrap"><button class="btn" id="auLogout" type="button">Log out</button></div></section>` : '';
+      return s ? `<section class="panel"><h2>Account 👤</h2><p class="muted small">Signed in as <b>${esc(s.u)}</b>. Your cards save to your account automatically.</p><p class="small" id="auDiag" role="status"></p><div class="row wrap"><button class="btn" id="auSync" type="button">Save to account now</button><button class="btn" id="auLogout" type="button">Log out</button></div></section>` : '';
     }
-    function bindSettings() { const b = $('#auLogout'); if (b) b.onclick = async () => { b.disabled = true; b.textContent = 'Saving and logging out...'; await logOut(); }; }
+    function bindSettings() {
+      const b = $('#auLogout'); if (b) b.onclick = async () => { b.disabled = true; b.textContent = 'Saving and logging out...'; await logOut(); };
+      const y = $('#auSync'); if (y) y.onclick = async () => { y.disabled = true; const d = $('#auDiag'); d.textContent = 'Saving...'; try { d.textContent = await net.diag(); } catch (e) { d.textContent = 'Failed: ' + (e.message || e); } y.disabled = false; };
+    }
 
     return { loggedIn: loggedIn, session: session, page: page, logOut: logOut, watch: watch, settingsHTML: settingsHTML, bindSettings: bindSettings };
   };

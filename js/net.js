@@ -160,7 +160,7 @@
     async function publish(force, keep) {
       const s = S(), c = conf(), snap = build(), key = JSON.stringify(Object.assign({}, snap, { seen: 0 }));
       if (net.cfg.blocked.some((x) => x.id === s.profile.id)) return; // removed from the leaderboard by the admin
-      const mine = net.dir.find(isMe);
+      const mine = net.dir.find(isMe) || (net.myNum ? { num: net.myNum } : null);
       if (!force && key === net.lastKey && Date.now() - net.lastBeat < BEAT_MS && (mine || Date.now() - net.createdAt < 120000)) return;
       let body = JSON.stringify(snap);
       if (body.length > MAX_BODY) { delete snap.banner; body = JSON.stringify(snap); }
@@ -169,12 +169,22 @@
       const title = `player:${s.profile.id} ${s.profile.name}`.replace(/[\r\n]+/g, ' ');
       if (mine) await gh('PATCH', `/repos/${c.repo}/issues/${mine.num}`, { title: title, body: body }, keep);
       else if (Date.now() - net.createdAt > 120000) {
-        await gh('POST', `/repos/${c.repo}/issues`, { title: title, body: body });
+        const made = await gh('POST', `/repos/${c.repo}/issues`, { title: title, body: body }); net.myNum = made.number;
         net.createdAt = Date.now();
       } else return;
       net.lastKey = key; net.lastBeat = Date.now();
       s.syncMod = snap.save.mod; delete s.overwrite; ctx.save(true);
       if (mine) mine.mod = snap.save.mod;
+    }
+    // Plain-English report used by the Account panel in Settings.
+    async function diag() {
+      const c = conf(), s = S();
+      if (!c.repo || !c.token) return 'Not connected: no GitHub repo/token configured (repo "' + (c.repo || 'none') + '").';
+      await cycle(true);
+      if (net.status !== 'ok') return 'Sync FAILED: ' + net.msg;
+      const mine = net.dir.find(isMe), local = Object.keys(s.cards).filter((id) => s.cards[id].n > 0).length;
+      if (!mine) return 'Connected to ' + c.repo + ' but your save is NOT online yet (no player entry found for id ' + s.profile.id + '). Press the button again in a few seconds.';
+      return 'Saved online (' + c.repo + ', issue #' + mine.num + '): ' + mine.unique + ' cards online, ' + local + ' on this device.';
     }
     // If another device uploaded a newer save than the one this device last synced, bring it in (merging when this device also has new changes) before uploading.
     function reconcile() {
@@ -431,6 +441,6 @@
     }
     // The Online panel in Settings is switched off. Return settingsHTML/bindSettings below to bring it back (share toggle, own token, restore from cloud).
     const SHOW_SETTINGS = false;
-    return { gh: gh, conf: conf, enabled: enabled, refresh: refresh, updateConfig: updateConfig, saveCardImage: saveCardImage, closeIssue: closeIssue, createIssue: createIssue, loadCache: loadCache, start: start, touch: touch, paint: paint, cycle: cycle, pagePlayers: pagePlayers, pageUser: pageUser, pageTrades: pageTrades, settingsHTML: () => (SHOW_SETTINGS ? settingsHTML() : ''), bindSettings: () => { if (SHOW_SETTINGS) bindSettings(); }, state: net, build: build };
+    return { gh: gh, conf: conf, enabled: enabled, refresh: refresh, updateConfig: updateConfig, saveCardImage: saveCardImage, closeIssue: closeIssue, createIssue: createIssue, loadCache: loadCache, start: start, touch: touch, diag: diag, paint: paint, cycle: cycle, pagePlayers: pagePlayers, pageUser: pageUser, pageTrades: pageTrades, settingsHTML: () => (SHOW_SETTINGS ? settingsHTML() : ''), bindSettings: () => { if (SHOW_SETTINGS) bindSettings(); }, state: net, build: build };
   };
 })();
