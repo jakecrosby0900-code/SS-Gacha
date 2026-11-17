@@ -1,5 +1,5 @@
 {
- "updated": 1794934080826,
+ "updated": 1794940281913,
  "players": [
   {
    "id": "mwjvvhk77bm0c3",
@@ -7,8 +7,8 @@
    "hue": 28,
    "pfp": null,
    "joined": 1794866454265,
-   "seen": 1794934060664,
-   "opened": 51,
+   "seen": 1794934857788,
+   "opened": 54,
    "score": 657,
    "unique": 51,
    "skibidi": 3,
@@ -20,11 +20,11 @@
    "hue": 28,
    "pfp": null,
    "joined": 1794933592980,
-   "seen": 1794933988803,
-   "opened": 1,
-   "score": 26,
-   "unique": 5,
-   "skibidi": 0,
+   "seen": 1794938985534,
+   "opened": 11,
+   "score": 94,
+   "unique": 27,
+   "skibidi": 2,
    "rarest": "Mighty Jimmy"
   },
   {
@@ -73,6 +73,19 @@
    "pfp": null,
    "joined": 1794933859960,
    "seen": 1794933861085,
+   "opened": 0,
+   "score": 0,
+   "unique": 0,
+   "skibidi": 0,
+   "rarest": null
+  },
+  {
+   "id": "mwl139bxwqzcw2",
+   "name": "Player",
+   "hue": 28,
+   "pfp": null,
+   "joined": 1794940266237,
+   "seen": 1794940267368,
    "opened": 0,
    "score": 0,
    "unique": 0,
