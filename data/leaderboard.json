@@ -1,13 +1,26 @@
 {
- "updated": 1794933467137,
+ "updated": 1794933627675,
  "players": [
   {
    "id": "mwkx16ga7k0aur",
-   "name": "Player",
+   "name": "Test",
    "hue": 28,
    "pfp": null,
    "joined": 1794933450730,
-   "seen": 1794933451815,
+   "seen": 1794933603827,
+   "opened": 1,
+   "score": 5,
+   "unique": 5,
+   "skibidi": 0,
+   "rarest": "Bonnie"
+  },
+  {
+   "id": "mwkx4lyc0pzutk",
+   "name": "Player",
+   "hue": 28,
+   "pfp": null,
+   "joined": 1794933610788,
+   "seen": 1794933611297,
    "opened": 0,
    "score": 0,
    "unique": 0,
