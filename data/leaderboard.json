@@ -1,5 +1,5 @@
 {
- "updated": 1794954169697,
+ "updated": 1794954417553,
  "players": [
   {
    "id": "mwl6d0nyb6w3i0",
@@ -7,7 +7,20 @@
    "hue": 28,
    "pfp": null,
    "joined": 1794952301738,
-   "seen": 1794954165529,
+   "seen": 1794954375928,
+   "opened": 1,
+   "score": 31,
+   "unique": 5,
+   "skibidi": 0,
+   "rarest": "Bugtrap"
+  },
+  {
+   "id": "mwl9ialqb6eanb",
+   "name": "mananimations",
+   "hue": 28,
+   "pfp": null,
+   "joined": 1794954407111,
+   "seen": 1794954407556,
    "opened": 0,
    "score": 0,
    "unique": 0,
