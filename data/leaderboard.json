@@ -1,5 +1,5 @@
 {
- "updated": 1794941153811,
+ "updated": 1794941302722,
  "players": [
   {
    "id": "mwjvvhk77bm0c3",
@@ -13,6 +13,19 @@
    "unique": 51,
    "skibidi": 3,
    "rarest": "Redacted"
+  },
+  {
+   "id": "mwl1l0qhia3gyr",
+   "name": "Player",
+   "hue": 28,
+   "pfp": null,
+   "joined": 1794941094905,
+   "seen": 1794941200912,
+   "opened": 23,
+   "score": 179,
+   "unique": 35,
+   "skibidi": 2,
+   "rarest": "RXQ"
   },
   {
    "id": "mwl139bxwqzcw2",
@@ -93,12 +106,12 @@
    "rarest": null
   },
   {
-   "id": "mwl1l0qhia3gyr",
+   "id": "mwl1p42o18racq",
    "name": "Player",
    "hue": 28,
    "pfp": null,
-   "joined": 1794941094905,
-   "seen": 1794941140895,
+   "joined": 1794941285856,
+   "seen": 1794941287734,
    "opened": 0,
    "score": 0,
    "unique": 0,
