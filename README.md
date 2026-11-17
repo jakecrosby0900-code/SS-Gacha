@@ -1,5 +1,5 @@
 # Special Strike Gacha
-Open `index.html` (or run `python3 -m http.server` and visit localhost:8000). Everything saves in your browser's local storage.
+Open `index.html` (or run `python3 -m http.server` and visit localhost:8000). Players must sign in or create an account to play. Progress saves in the browser and, through the account, online.
 
 ## Card images (optional)
 With Node 18+: `node tools/fetch-images.mjs`. It downloads each character's main image from the Special Strike wiki into `images/cards/` and writes `js/images.js`.
@@ -21,3 +21,19 @@ Everything online runs through GitHub Issues, so there is no server. The game wo
 
 What it does: while the site is open it publishes your profile and collection to your own "player:..." issue about every 60 seconds. The Players page lists everyone, with search and profiles. Trades are "trade:..." issues; the offered cards are held until the other player answers.
 Anyone with the token can edit any issue, so this is built for friends, not for security.
+
+## Accounts (sign in / sign up)
+Nobody can play until they are signed in (`js/auth.js`). Accounts use the same GitHub Issues setup as the leaderboard, so the online setup above must be working.
+- Each account is an issue titled `account:<username>` holding the username, a salt and a PBKDF2 hash of the password. The password itself is never stored.
+- Players who already had progress keep it: when they create an account on their device, that save becomes the account's save. Signing in on another device loads the account's last published save.
+- Limits: this is a client-side gate, and the hashes are readable by anyone who can read the repo's issues. Fine for a friends game, not for anything sensitive.
+
+## Admin page
+Settings > Admin: log in with the admin username and password, then open the Admin page (`js/admin.js`). It can:
+- remove players from the leaderboard (and restore them) and delete accounts,
+- add new cards, edit any card's name, set and rarity, and upload card pictures.
+
+Changes are saved online (a `config:game` issue, plus one `cardimg` issue per uploaded picture), so every player sees them. Do not close or edit those issues by hand. The leaderboard Action reads the config too, so removed players stay off `data/leaderboard.json`.
+The admin login is stored only as a salted hash in `js/admin.js`. To change it, run this in Node and paste the new `salt` and `hash` into `ADMIN`:
+`node -e "const c=require('crypto');const s=c.randomBytes(16);console.log(s.toString('base64'),c.pbkdf2Sync('USER\\nPASSWORD',s,150000,32,'sha256').toString('base64'))"`
+This check runs in the browser, so it keeps normal players out but is not real security (see the note on the shared token above).

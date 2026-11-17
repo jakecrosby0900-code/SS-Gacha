@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 globalThis.window = {};
 await import(path.join(root, 'js/data.js'));
-const BYID = window.SSG.BYID;
+const G = window.SSG;
 const repo = process.env.GITHUB_REPOSITORY, token = process.env.GITHUB_TOKEN;
 if (!repo) { console.error('GITHUB_REPOSITORY is not set'); process.exit(1); }
 const headers = { Accept: 'application/vnd.github+json', ...(token ? { Authorization: `Bearer ${token}` } : {}) };
@@ -15,10 +15,18 @@ for (let page = 1; page <= 10; page++) {
   if (!r.ok) { console.error('GitHub API error', r.status); process.exit(1); }
   const list = await r.json(); issues = issues.concat(list.filter((i) => !i.pull_request)); if (list.length < 100) break;
 }
+// Admin settings (cards added or edited, players removed from the leaderboard) live in one "config" issue; apply them first.
+let cfgIssue = null; const cardImgs = {};
+for (const i of issues) {
+  let b; try { b = JSON.parse(i.body); } catch { continue; }
+  if (b && b.t === 'config' && (!cfgIssue || i.number < cfgIssue.number)) cfgIssue = { number: i.number, b };
+}
+G.applyConfig(cfgIssue ? cfgIssue.b : null, cardImgs);
+const BYID = G.BYID, blocked = new Set(G.getConfig().blocked.map((x) => x.id));
 const seen = {}, players = [];
 for (const i of issues.sort((a, b) => a.number - b.number)) {
   let b; try { b = JSON.parse(i.body); } catch { continue; }
-  if (!b || b.t !== 'player' || !/^[a-z0-9]{6,40}$/.test(b.id || '') || seen[b.id]) continue;
+  if (!b || b.t !== 'player' || !/^[a-z0-9]{6,40}$/.test(b.id || '') || seen[b.id] || blocked.has(b.id)) continue;
   seen[b.id] = 1;
   let score = 0, unique = 0, skibidi = 0, best = null;
   for (const [id, a] of Object.entries(b.cards || {})) {

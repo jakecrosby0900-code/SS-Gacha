@@ -113,7 +113,9 @@ The Big J Mythic`;
 
   // Cards with their own picture instead of the generated face.
   const IMAGES = Object.assign({ 'EXTRA:Awesome Garfield NFT from like 10 years ago': 'images/garfield-nft.jpg' }, window.SSG_IMAGES || {});
-  const CARDS = [];
+
+  // ---- base roster (parsed once from RAW) ----
+  const BASE = [];
   const ssNames = {}; // names seen in the SS set, so SSR copies of them can be marked Epilogue
   let cat = null;
   RAW.split('\n').forEach(function (line) {
@@ -128,19 +130,65 @@ The Big J Mythic`;
     const RENAME = { 'SSR:Mecha': 'Withered Mecha', 'SSR:General': 'The Cooler General' };
     const EPI_SSR = ['Helpy', 'Lefty', 'Puppet', 'Security Puppet'];
     const name = RENAME[id] || ((cat === 'SS3' || (cat === 'SSR' && (ssNames[baseName] || EPI_SSR.indexOf(baseName) >= 0))) ? 'Epilogue ' + baseName : baseName);
-    const ti = TIERS.indexOf(tier);
-    CARDS.push({ img: IMAGES[id] || null, id: id, name: name, cat: cat, tier: tier, ti: ti, pts: POINTS[ti], monster: !!CATS[cat].monster });
+    BASE.push({ id: id, name: name, cat: cat, tier: tier });
   });
-  // Rank 1 = hardest to pull. Ties break by set order, then name.
-  const catOrder = Object.keys(CATS);
-  CARDS.slice().sort(function (a, b) { return b.ti - a.ti || catOrder.indexOf(a.cat) - catOrder.indexOf(b.cat) || a.name.localeCompare(b.name); })
-    .forEach(function (c, i) { c.rank = i + 1; });
-  const BYID = {}; CARDS.forEach(function (c) { BYID[c.id] = c; });
-  const BYTIER = TIERS.map(function (t) { return CARDS.filter(function (c) { return c.tier === t; }); });
-  // What packs normally draw from (monster cards are left out), and the extra pool the monster adds.
-  const POOL = BYTIER.map(function (l) { return l.filter(function (c) { return !c.monster; }); });
-  const MONSTER_POOL = CARDS.filter(function (c) { return c.monster; });
+
+  // ---- live card lists ----
+  // These objects are filled IN PLACE by rebuild(), so every part of the game that already holds a reference to them keeps working
+  // when the admin edits cards or adds new ones.
+  const CARDS = [], BYID = {};
+  const BYTIER = TIERS.map(function () { return []; });
+  const POOL = TIERS.map(function () { return []; });
+  const MONSTER_POOL = [];
   const MONSTER_CHANCE = 0.05; // chance per card slot, only while the monster is let in
+
+  // Admin config (stored online by the admin page): { blocked: [{id,name}], edits: { cardId: {name,tier,cat} }, added: [{id,name,cat,tier}] }
+  const isObj = function (x) { return x && typeof x === 'object' && !Array.isArray(x); };
+  function cleanConfig(b) {
+    const o = { blocked: [], edits: {}, added: [] };
+    if (!isObj(b)) return o;
+    if (Array.isArray(b.blocked)) b.blocked.slice(0, 500).forEach(function (x) {
+      if (x && typeof x.id === 'string' && /^[a-z0-9]{6,40}$/.test(x.id)) o.blocked.push({ id: x.id, name: String(x.name == null ? 'Player' : x.name).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 20) || 'Player' });
+    });
+    if (isObj(b.edits)) Object.keys(b.edits).slice(0, 1000).forEach(function (k) {
+      const e = b.edits[k]; if (!isObj(e)) return; const r = {};
+      if (typeof e.name === 'string' && e.name.trim()) r.name = e.name.replace(/[\r\n\t]+/g, ' ').trim().slice(0, 60);
+      if (TIERS.indexOf(e.tier) >= 0) r.tier = e.tier;
+      if (typeof e.cat === 'string' && CATS[e.cat]) r.cat = e.cat;
+      o.edits[String(k).slice(0, 120)] = r;
+    });
+    if (Array.isArray(b.added)) b.added.slice(0, 500).forEach(function (a) {
+      if (!isObj(a) || typeof a.id !== 'string' || !a.id || a.id.length > 120 || a.id.indexOf('|') >= 0) return;
+      const name = String(a.name == null ? '' : a.name).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 60);
+      if (!name || !CATS[a.cat] || TIERS.indexOf(a.tier) < 0) return;
+      o.added.push({ id: a.id, name: name, cat: a.cat, tier: a.tier });
+    });
+    return o;
+  }
+
+  let CONFIG = cleanConfig(null), CONFIG_IMAGES = {};
+  function rebuild() {
+    const list = [], seen = {};
+    BASE.forEach(function (b) { const e = CONFIG.edits[b.id] || {}; seen[b.id] = 1; list.push({ id: b.id, name: e.name || b.name, cat: e.cat || b.cat, tier: e.tier || b.tier, custom: false, img: CONFIG_IMAGES[b.id] || IMAGES[b.id] || null }); });
+    CONFIG.added.forEach(function (a) { if (seen[a.id]) return; seen[a.id] = 1; const e = CONFIG.edits[a.id] || {}; list.push({ id: a.id, name: e.name || a.name, cat: e.cat || a.cat, tier: e.tier || a.tier, custom: true, img: CONFIG_IMAGES[a.id] || null }); });
+    CARDS.length = 0; Object.keys(BYID).forEach(function (k) { delete BYID[k]; });
+    BYTIER.forEach(function (l) { l.length = 0; }); POOL.forEach(function (l) { l.length = 0; }); MONSTER_POOL.length = 0;
+    list.forEach(function (c) {
+      c.ti = TIERS.indexOf(c.tier); c.pts = POINTS[c.ti]; c.monster = !!CATS[c.cat].monster;
+      CARDS.push(c); BYID[c.id] = c; BYTIER[c.ti].push(c); if (c.monster) MONSTER_POOL.push(c); else POOL[c.ti].push(c);
+    });
+    // Rank 1 = hardest to pull. Ties break by set order, then name.
+    const catOrder = Object.keys(CATS);
+    CARDS.slice().sort(function (a, b) { return b.ti - a.ti || catOrder.indexOf(a.cat) - catOrder.indexOf(b.cat) || a.name.localeCompare(b.name); })
+      .forEach(function (c, i) { c.rank = i + 1; });
+  }
+  function applyConfig(cfg, images) {
+    CONFIG = cleanConfig(cfg); CONFIG_IMAGES = {};
+    if (isObj(images)) Object.keys(images).forEach(function (k) { if (typeof images[k] === 'string') CONFIG_IMAGES[k] = images[k]; });
+    rebuild(); return CONFIG;
+  }
+  // Build the starting roster now (the admin config is applied later, once it has loaded).
+  rebuild();
 
   // Base chance weight of each tier for one card slot, before a difficulty's luck is applied to Rare and above.
   const BASE_WEIGHTS = [50, 28, 14, 5, 2, 0.8, 0.08];
@@ -161,6 +209,6 @@ The Big J Mythic`;
     MGJ:   { packs: 10, note: 'The Big three' }
   };
 
-  window.SSG = { TIERS: TIERS, TIER_COLOR: TIER_COLOR, CATS: CATS, CARDS: CARDS, BYID: BYID, BYTIER: BYTIER, POOL: POOL, MONSTER_POOL: MONSTER_POOL, MONSTER_CHANCE: MONSTER_CHANCE,
+  window.SSG = { applyConfig: applyConfig, cleanConfig: cleanConfig, getConfig: function () { return CONFIG; }, BASE: BASE, TIERS: TIERS, TIER_COLOR: TIER_COLOR, CATS: CATS, CARDS: CARDS, BYID: BYID, BYTIER: BYTIER, POOL: POOL, MONSTER_POOL: MONSTER_POOL, MONSTER_CHANCE: MONSTER_CHANCE,
     BASE_WEIGHTS: BASE_WEIGHTS, SELL: SELL, POINTS: POINTS, CODES: CODES, DIFFS: DIFFS, hash: hash, rng: rng };
 })();

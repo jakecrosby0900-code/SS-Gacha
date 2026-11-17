@@ -13,7 +13,8 @@
     const G = ctx.G, BYID = G.BYID, CARDS = G.CARDS, esc = ctx.esc, $ = ctx.$, $$ = ctx.$$;
     const S = () => ctx.S();
     const LS = 'ss-gacha-net', EVERY = 60000, ONLINE_MS = 150000, BEAT_MS = 240000, MAX_BODY = 64000;
-    const net = { dir: [], trades: [], status: 'off', msg: '', last: 0, busy: false, lastKey: '', lastBeat: 0, createdAt: 0, loaded: false };
+    const net = { dir: [], trades: [], accounts: [], cfg: G.cleanConfig(null), cfgNum: 0, imgNum: {}, cfgKey: '', status: 'off', msg: '', last: 0, busy: false, lastKey: '', lastBeat: 0, createdAt: 0, loaded: false, cfgChanged: false };
+    const CFG_CACHE = 'ss-gacha-cfg';
     const view = { by: 'score', q: '' };
     const okImg = (v) => (typeof v === 'string' && /^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(v) && v.length < 200000 ? v : null);
     const nm = (v) => String(v == null ? '' : v).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 20) || 'Player';
@@ -65,21 +66,76 @@
       return { id: tid, num: num, from: { id: f.id, name: nm(f.name) }, to: { id: t.id, name: nm(t.name) }, give: items(b.give), want: items(b.want), at: +b.at || 0,
         status: ['open', 'accepted', 'declined', 'cancelled'].indexOf(b.status) >= 0 ? b.status : 'open' };
     }
+    // ---------- admin config (card edits, new cards, removed players) ----------
+    function applyCfg(cfg, imgs) {
+      const key = JSON.stringify([cfg, imgs]);
+      net.cfg = G.applyConfig(cfg, imgs);
+      if (key !== net.cfgKey) { net.cfgKey = key; net.cfgChanged = true; }
+    }
+    // Shows the cards the admin set up before the first online sync finishes.
+    function loadCache() {
+      try { const j = JSON.parse(localStorage.getItem(CFG_CACHE) || 'null'); if (j && j.cfg) { const imgs = {}; Object.keys(j.imgs || {}).forEach((k) => { const v = okImg(j.imgs[k]); if (v) imgs[k] = v; }); applyCfg(j.cfg, imgs); net.cfgChanged = false; } } catch (e) { /* ignore */ }
+    }
+    function cacheCfg(imgs) {
+      try { localStorage.setItem(CFG_CACHE, JSON.stringify({ cfg: net.cfg, imgs: imgs })); }
+      catch (e) { try { localStorage.setItem(CFG_CACHE, JSON.stringify({ cfg: net.cfg, imgs: {} })); } catch (e2) { /* ignore */ } }
+    }
     async function refresh() {
       const c = conf(); let all = [];
       for (let page = 1; page <= 5; page++) {
         const r = await gh('GET', `/repos/${c.repo}/issues?state=open&per_page=100&page=${page}`);
         all = all.concat(r.filter((i) => !i.pull_request)); if (r.length < 100) break;
       }
+      const parsed = [];
+      all.forEach((i) => { let b; try { b = JSON.parse(i.body); } catch (e) { return; } if (b && typeof b === 'object') parsed.push({ i: i, b: b }); });
+      // 1) admin config, card pictures and accounts first, so custom cards exist before players are read
+      let cfgIssue = null; const imgs = {}, imgNum = {}, accounts = {};
+      parsed.forEach((x) => {
+        const b = x.b, num = x.i.number;
+        if (b.t === 'config') { if (!cfgIssue || num < cfgIssue.num) cfgIssue = { num: num, b: b }; }
+        else if (b.t === 'cardimg' && typeof b.id === 'string') { const im = okImg(b.img); if (im && (imgNum[b.id] == null || num < imgNum[b.id])) { imgs[b.id] = im; imgNum[b.id] = num; } }
+        else if (b.t === 'account' && typeof b.k === 'string' && /^[a-z0-9_]{3,20}$/.test(b.k) && typeof b.salt === 'string' && typeof b.hash === 'string' && idOk(b.pid)) {
+          if (!accounts[b.k] || accounts[b.k].num > num) accounts[b.k] = { k: b.k, u: String(b.u || b.k).slice(0, 20), salt: b.salt.slice(0, 64), hash: b.hash.slice(0, 128), iter: +b.iter || 0, pid: b.pid, created: +b.created || 0, num: num };
+        }
+      });
+      net.cfgNum = cfgIssue ? cfgIssue.num : 0; net.imgNum = imgNum;
+      applyCfg(cfgIssue ? cfgIssue.b : null, imgs); cacheCfg(imgs);
+      net.accounts = Object.keys(accounts).map((k) => accounts[k]);
+      // 2) players and trades
+      const blocked = {}; net.cfg.blocked.forEach((x) => { blocked[x.id] = 1; });
       const players = {}, trades = [];
-      all.forEach((i) => {
-        let b; try { b = JSON.parse(i.body); } catch (e) { return; }
-        if (!b || typeof b !== 'object') return;
-        if (b.t === 'player') { const p = cleanPlayer(b, i.number); if (p && (!players[p.id] || players[p.id].num > p.num)) players[p.id] = p; }
-        else if (b.t === 'trade') { const t = cleanTrade(b, i.number); if (t) trades.push(t); }
+      parsed.forEach((x) => {
+        const b = x.b, num = x.i.number;
+        if (b.t === 'player') { const p = cleanPlayer(b, num); if (p && !blocked[p.id] && (!players[p.id] || players[p.id].num > p.num)) players[p.id] = p; }
+        else if (b.t === 'trade') { const t = cleanTrade(b, num); if (t && !blocked[t.from.id] && !blocked[t.to.id]) trades.push(t); }
       });
       net.dir = Object.keys(players).map((k) => players[k]); net.trades = trades; net.last = Date.now(); net.loaded = true;
     }
+    // Admin writes. Re-reads the config issue first so two edits do not overwrite each other.
+    async function updateConfig(fn) {
+      const c = conf(); let cfg = G.cleanConfig(null);
+      if (net.cfgNum) { try { const cur = await gh('GET', `/repos/${c.repo}/issues/${net.cfgNum}`); cfg = G.cleanConfig(JSON.parse(cur.body)); } catch (e) { if (e.status && e.status !== 404 && e.status !== 410) throw e; } }
+      fn(cfg); cfg = G.cleanConfig(cfg);
+      const body = JSON.stringify(Object.assign({ t: 'config', v: 1 }, cfg));
+      if (body.length > MAX_BODY) throw new Error('Config is too big for one GitHub issue');
+      if (net.cfgNum) await gh('PATCH', `/repos/${c.repo}/issues/${net.cfgNum}`, { body: body });
+      else { const r = await gh('POST', `/repos/${c.repo}/issues`, { title: 'config:game', body: body }); net.cfgNum = r.number; }
+      await refresh();
+    }
+    // dataUrl = null removes the custom picture.
+    async function saveCardImage(id, dataUrl) {
+      const c = conf(), num = net.imgNum[id];
+      if (!dataUrl) { if (num) await gh('PATCH', `/repos/${c.repo}/issues/${num}`, { state: 'closed' }); }
+      else {
+        const body = JSON.stringify({ t: 'cardimg', v: 1, id: id, img: dataUrl });
+        if (body.length > MAX_BODY) throw new Error('That picture is too big. Try a smaller one.');
+        if (num) await gh('PATCH', `/repos/${c.repo}/issues/${num}`, { body: body });
+        else await gh('POST', `/repos/${c.repo}/issues`, { title: `cardimg ${id}`.replace(/[\r\n]+/g, ' '), body: body });
+      }
+      await refresh();
+    }
+    async function closeIssue(num) { await gh('PATCH', `/repos/${conf().repo}/issues/${num}`, { state: 'closed' }); }
+    async function createIssue(title, body) { const r = await gh('POST', `/repos/${conf().repo}/issues`, { title: title, body: JSON.stringify(body) }); return r.number; }
     async function fallback() {
       if (net.loaded && Date.now() - net.last < 60000) return;
       try {
@@ -102,6 +158,7 @@
     }
     async function publish(force) {
       const s = S(), c = conf(), snap = build(), key = JSON.stringify(Object.assign({}, snap, { seen: 0 }));
+      if (net.cfg.blocked.some((x) => x.id === s.profile.id)) return; // removed from the leaderboard by the admin
       const mine = net.dir.find(isMe);
       if (!force && key === net.lastKey && Date.now() - net.lastBeat < BEAT_MS && (mine || Date.now() - net.createdAt < 120000)) return;
       let body = JSON.stringify(snap);
@@ -203,11 +260,12 @@
         if (!enabled()) { await fallback(); net.status = 'off'; net.msg = ''; }
         else {
           await refresh(); changedFlag = settle(); if (changedFlag) ctx.save();
-          await flushQ(); if (S().settings.share) await publish(force);
+          await flushQ(); if (S().settings.share && ctx.loggedIn()) await publish(force);
           net.status = 'ok'; net.msg = '';
         }
       } catch (e) { net.status = 'err'; net.msg = e.message || 'Sync failed'; }
-      net.busy = false; paint(); repaint(changedFlag);
+      if (net.cfgChanged) { changedFlag = true; net.cfgChanged = false; }
+      net.busy = false; paint(); repaint(changedFlag); if (ctx.onSync) ctx.onSync();
     }
     function statusText() {
       if (net.status === 'ok') return `Online · synced ${Math.max(0, Math.round((Date.now() - net.last) / 1000))}s ago${S().settings.share ? '' : ' · not sharing your profile'}`;
@@ -221,10 +279,10 @@
       const ss = $('#netstatus'); if (ss) ss.textContent = statusText();
     }
     function repaint(changed) {
-      if ($('.modal-bg') || ctx.busy()) return;
+      if ($('.modal-bg') || ctx.busy() || !ctx.loggedIn()) return;
       const h = location.hash.slice(1) || 'home';
       if (h === 'players') drawPlayers(); else if (h === 'trades') drawTrades(); else if (h.indexOf('user-') === 0) ctx.route();
-      else if (changed && h !== 'options') ctx.route();
+      else if (changed && h !== 'options' && h !== 'admin') ctx.route();
     }
 
     // ---------- pages ----------
@@ -344,6 +402,6 @@
     }
     // The Online panel in Settings is switched off. Return settingsHTML/bindSettings below to bring it back (share toggle, own token, restore from cloud).
     const SHOW_SETTINGS = false;
-    return { start: start, paint: paint, cycle: cycle, pagePlayers: pagePlayers, pageUser: pageUser, pageTrades: pageTrades, settingsHTML: () => (SHOW_SETTINGS ? settingsHTML() : ''), bindSettings: () => { if (SHOW_SETTINGS) bindSettings(); }, state: net, build: build };
+    return { gh: gh, conf: conf, enabled: enabled, refresh: refresh, updateConfig: updateConfig, saveCardImage: saveCardImage, closeIssue: closeIssue, createIssue: createIssue, loadCache: loadCache, start: start, paint: paint, cycle: cycle, pagePlayers: pagePlayers, pageUser: pageUser, pageTrades: pageTrades, settingsHTML: () => (SHOW_SETTINGS ? settingsHTML() : ''), bindSettings: () => { if (SHOW_SETTINGS) bindSettings(); }, state: net, build: build };
   };
 })();

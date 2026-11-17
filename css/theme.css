@@ -188,3 +188,16 @@ kbd{display:inline-block;min-width:1.6em;padding:1px 7px;border-radius:7px;borde
 .tr-hist{list-style:none;padding:0;margin:0;display:grid;gap:6px}
 @media(max-width:700px){.tr-cols{grid-template-columns:1fr}.pl-row{gap:10px;padding:8px 10px}}
 .pl-top{display:flex;align-items:center;gap:8px;min-width:0}.pl-top b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Sign in / sign up */
+.auth-wrap{max-width:440px;margin:6vh auto 0}
+.auth{display:grid;gap:14px}.auth h1{margin:0}.auth form{display:grid;gap:12px}.auth .tabs{display:flex;gap:8px}
+.auth-err{color:var(--danger);min-height:1.2em;margin:0;font-size:.9rem}
+.auth .btn.primary{width:100%}
+/* Admin page */
+.ad-list{display:grid;gap:8px}
+.ad-row{display:flex;align-items:center;gap:12px;padding:8px 12px;border:1px solid var(--line);border-radius:12px;background:rgba(0,0,0,.18)}
+.ad-main{flex:1;min-width:0;display:grid}.ad-main small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#main section.panel+section.panel{margin-top:18px}
+.ad-edit{display:flex;gap:22px;flex-wrap:wrap;align-items:flex-start}.ad-fields{flex:1 1 260px;display:grid;gap:12px}.ad-prev{flex:0 0 auto;margin:0 auto}
+#adCards .card-btn{position:relative}.ad-tag{position:absolute;top:4px;right:4px;z-index:9;font-size:.65rem;padding:2px 6px;border-radius:999px;background:var(--accent2);color:#fff}
