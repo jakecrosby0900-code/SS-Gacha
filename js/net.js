@@ -169,8 +169,7 @@
       const title = `player:${s.profile.id} ${s.profile.name}`.replace(/[\r\n]+/g, ' ');
       if (mine) await gh('PATCH', `/repos/${c.repo}/issues/${mine.num}`, { title: title, body: body }, keep);
       else if (Date.now() - net.createdAt > 120000) {
-        try { await gh('POST', `/repos/${c.repo}/issues`, { title: title, body: body, labels: ['player'] }); }
-        catch (e) { if (e.status === 422) await gh('POST', `/repos/${c.repo}/issues`, { title: title, body: body }); else throw e; }
+        await gh('POST', `/repos/${c.repo}/issues`, { title: title, body: body });
         net.createdAt = Date.now();
       } else return;
       net.lastKey = key; net.lastBeat = Date.now();
@@ -192,7 +191,7 @@
     function touch() {
       if (!enabled()) return; clearTimeout(touchT);
       const go = () => { if (net.busy) { touchT = setTimeout(go, 800); return; } cycle(true); };
-      touchT = setTimeout(go, 2500);
+      touchT = setTimeout(go, 1000);
     }
     // The tab is closing or going to the background: push anything not yet uploaded.
     function flush() {
@@ -246,9 +245,9 @@
       give.forEach((it) => ctx.takeCopy(it.id, it.h));
       s.net.out[tid] = { to: toId, toName: to.name, give: give, want: want, at: Date.now(), num: 0 }; ctx.save();
       const body = { t: 'trade', id: tid, from: { id: s.profile.id, name: s.profile.name }, to: { id: to.id, name: to.name }, give: give, want: want, status: 'open', at: Date.now() };
-      const issue = { title: `trade:${tid} ${s.profile.name} → ${to.name}`.replace(/[\r\n]+/g, ' '), body: JSON.stringify(body), labels: ['trade'] };
+      const issue = { title: `trade:${tid} ${s.profile.name} → ${to.name}`.replace(/[\r\n]+/g, ' '), body: JSON.stringify(body) };
       try {
-        let r; try { r = await gh('POST', `/repos/${c.repo}/issues`, issue); } catch (e) { if (e.status === 422) { delete issue.labels; r = await gh('POST', `/repos/${c.repo}/issues`, issue); } else throw e; }
+        const r = await gh('POST', `/repos/${c.repo}/issues`, issue);
         s.net.out[tid].num = r.number; ctx.save();
       } catch (e) { give.forEach((it) => ctx.addCopy(it.id, it.h)); delete s.net.out[tid]; ctx.save(); throw e; }
     }
@@ -282,7 +281,7 @@
     const toast = (m, err) => ctx.toast(m, err);
 
     // ---------- sync loop ----------
-    let changedFlag = false, pendingForce = false;
+    let changedFlag = false, pendingForce = false, lastWarn = 0;
     async function cycle(force) {
       if (net.busy) { if (force) pendingForce = true; return; } net.busy = true; changedFlag = false;
       try {
@@ -292,7 +291,7 @@
           await flushQ(); if (ctx.loggedIn()) { if (reconcile()) changedFlag = true; await publish(force); }
           net.status = 'ok'; net.msg = '';
         }
-      } catch (e) { net.status = 'err'; net.msg = e.message || 'Sync failed'; }
+      } catch (e) { net.status = 'err'; net.msg = e.message || 'Sync failed'; if (ctx.loggedIn() && Date.now() - lastWarn > 30000) { lastWarn = Date.now(); toast('Could not save to your account: ' + net.msg, true); } }
       if (net.cfgChanged) { changedFlag = true; net.cfgChanged = false; }
       net.busy = false; paint(); repaint(changedFlag); if (ctx.onSync) ctx.onSync();
       if (pendingForce) { pendingForce = false; setTimeout(() => cycle(true), 50); }

@@ -430,8 +430,7 @@
       <section class="panel"><h2>The Monster 👹</h2><label class="check"><input id="optMonster" type="checkbox" ${S.settings.monster ? 'checked' : ''}> Let the monster in</label><p class="muted small">Each pack you open has a 25% chance that the monster eats one random card from it. Eaten cards are gone for good and never reach your collection. But with the monster in, packs can also contain ${G.MONSTER_POOL.length} special cards that can't be found any other way (about ${Math.round(G.MONSTER_CHANCE * 100)}% per card slot).</p></section>
       ${net ? net.settingsHTML() : ''}
       ${auth ? auth.settingsHTML() : ''}
-      ${admin ? admin.settingsHTML() : ''}
-      <section class="panel danger-zone"><h2>Reset</h2><p class="muted small">Deletes all your cards and stats.</p><button class="btn danger" data-act="reset">Reset everything</button></section>`;
+      ${admin ? admin.settingsHTML() : ''}`;
     $('#optSound').onchange = (e) => { S.settings.sound = e.target.checked; applyAudio(); save(); renderHeader(); };
     $('#optVol').oninput = (e) => { S.settings.volume = +e.target.value; applyAudio(); save(); };
     $('#optMotion').onchange = (e) => { S.settings.motion = e.target.checked; save(); };
@@ -572,8 +571,6 @@
       case 'redeem': redeemModal(); break;
       case 'edit-profile': editProfile(); break;
       case 'fav': { const x = S.cards[id]; if (x) { x.f = x.f ? 0 : 1; save(); closeModal(); cardModal(id); route(); } break; }
-      case 'reset': if (!t.dataset.sure) { t.dataset.sure = 1; t.textContent = 'Press again to erase everything'; setTimeout(() => { if (t.isConnected) { delete t.dataset.sure; t.textContent = 'Reset everything'; } }, 4000); break; }
-        { const keep = { a: S.account, id: S.profile.id, n: S.profile.name }; S = fresh(); S.account = keep.a; S.profile.id = keep.id; S.profile.name = keep.n; S.overwrite = true; } save(); renderHeader(); route(); toast('Save reset'); break;
     }
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { const m = $$('.modal-bg').pop(); if (m && !$('.welcome', m)) closeModal(m); } });
