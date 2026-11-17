@@ -619,7 +619,7 @@
         const cloudNewer = p.mod > (S.mod || 0);
         next.codes = Array.from(new Set((next.codes || []).concat(raw.codes || []))); next.granted = Object.assign({}, S.granted || {});
         // Take over the cloud's applied-gift list, except for removals this device has not applied yet (it must still apply them, or old cards would come back).
-        const pend = {}; net.state.grants.forEach((g) => { if (g.wipe || g.take.length) pend[g.gid] = 1; });
+        const pend = {}; net.state.grants.forEach((g) => { if (g.wipe || g.take.length || g.opened != null) pend[g.gid] = 1; });
         Object.keys(raw.granted || {}).forEach((k) => { if (!pend[k] || (S.granted || {})[k]) next.granted[k] = raw.granted[k]; });
         next.stats = { opened: Math.max(S.stats.opened, +(raw.stats && raw.stats.opened) || 0), pulls: Math.max(S.stats.pulls, +(raw.stats && raw.stats.pulls) || 0) };
         if (cloudNewer) { ['packs', 'last', 'sinceRare', 'started'].forEach((k) => { if (raw[k] != null) next[k] = raw[k]; }); if (raw.net) next.net = Object.assign({}, raw.net, { done: Object.assign({}, S.net.done, raw.net.done || {}) }); next.profile = Object.assign({}, S.profile, prof); }

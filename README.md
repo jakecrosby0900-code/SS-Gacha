@@ -31,7 +31,7 @@ Nobody can play until they are signed in (`js/auth.js`). Accounts use the same G
 
 ## Admin page
 Settings > Admin: log in with the admin username and password, then open the Admin page (`js/admin.js`). It can:
-- list every account with its leaderboard stats: give it cards or packs, or take away chosen cards or all of them (applied the next time that player is online), remove it from the leaderboard, restore it (or restore everyone at once), or delete it,
+- list every account with its leaderboard stats: give it cards or packs, or take away chosen cards or all of them, change the packs-opened number, (applied the next time that player is online), remove it from the leaderboard, restore it (or restore everyone at once), or delete it,
 - add custom rarities (name, colour, points, drop weight, where it sits in the order) and custom sets,
 - add new cards, edit any card's name, set and rarity, and upload card pictures.
 

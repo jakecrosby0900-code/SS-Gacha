@@ -124,6 +124,18 @@
       });
     }
 
+    function statsModal(acc) {
+      const p = st().dir.find((x) => x.id === acc.pid);
+      const bg = ctx.modal(`<h2>Packs opened: ${esc(acc.u)}</h2><p class="muted small">This is the "packs opened" number on their profile and the leaderboard. It does not change their cards.</p>
+        <label class="f">Packs opened<input id="stOpen" type="number" min="0" max="1000000" value="${p ? p.opened : 0}"></label>
+        <div class="row wrap" style="margin-top:14px"><button class="btn primary" id="stGo" type="button">Save</button><button class="btn" data-act="close-modal" type="button">Cancel</button></div>`);
+      $('#stGo', bg).onclick = guard(async () => {
+        const v = Math.floor(+$('#stOpen', bg).value); if (!(v >= 0)) { toast('Enter a number', true); return; }
+        const gid = ctx.uid().replace(/[^a-z0-9]/g, '');
+        await net.createIssue('grant:' + gid + ' ' + acc.k, { t: 'grant', v: 1, gid: gid, k: acc.k, cards: [], packs: 0, opened: v, at: Date.now() });
+        ctx.closeModal(bg); toast('Done. It updates the next time ' + acc.u + ' is online.');
+      });
+    }
     // Removing cards works the same way: a grant that carries a "take" list (or wipe = everything), applied by the player's own device.
     function takeModal(acc) {
       const p = st().dir.find((x) => x.id === acc.pid);
@@ -293,7 +305,7 @@
         const p = byPid[a.pid], off = isBlocked(a.pid);
         const info = p ? `${ctx.fmt(p.score)} pts · ${p.unique} cards · ${p.opened} packs` : 'Nothing saved online yet';
         return `<div class="ad-row">${p ? ctx.avatarHTML(34, p) : ''}<span class="ad-main"><b>${esc(a.u)}</b>${p && p.name !== a.u ? ` <small class="muted">(${esc(p.name)})</small>` : ''}<small class="muted">${info}${off ? ' · <b>removed from leaderboard</b>' : ''}</small></span>
-          <button class="btn sm" data-ad-give="${esc(a.k)}" type="button">Give</button><button class="btn sm" data-ad-take="${esc(a.k)}" type="button">Take</button>
+          <button class="btn sm" data-ad-give="${esc(a.k)}" type="button">Give</button><button class="btn sm" data-ad-take="${esc(a.k)}" type="button">Take</button><button class="btn sm" data-ad-stats="${esc(a.k)}" type="button">Packs opened</button>
           ${off ? `<button class="btn sm" data-ad-restore="${esc(a.pid)}" type="button">Restore</button>` : `<button class="btn sm" data-ad-rm="${esc(a.pid)}" data-name="${esc(a.u)}" type="button">Remove</button>`}
           <button class="btn sm danger" data-ad-acc="${esc(a.k)}" type="button">Delete</button></div>`;
       };
@@ -321,12 +333,13 @@
       $('#adCat').onchange = (e) => { view.cat = e.target.value; redraw(); };
       $$('#adCards .card').forEach(ctx.tilt);
       $('#main').onclick = (e) => {
-        const t = e.target.closest('[data-ad-card],[data-ad-rm],[data-ad-restore],[data-ad-acc],[data-ad-give],[data-ad-take],[data-ad-tier],[data-ad-set]'); if (!t) return;
+        const t = e.target.closest('[data-ad-card],[data-ad-rm],[data-ad-restore],[data-ad-acc],[data-ad-give],[data-ad-take],[data-ad-stats],[data-ad-tier],[data-ad-set]'); if (!t) return;
         if (t.dataset.adCard) cardEditor(t.dataset.adCard);
         else if (t.dataset.adRm) removePlayer(t.dataset.adRm, t.dataset.name || 'Player');
         else if (t.dataset.adRestore) restorePlayer(t.dataset.adRestore);
         else if (t.dataset.adGive) { const a = accounts.find((x) => x.k === t.dataset.adGive); if (a) giveModal(a); }
         else if (t.dataset.adTake) { const a = accounts.find((x) => x.k === t.dataset.adTake); if (a) takeModal(a); }
+        else if (t.dataset.adStats) { const a = accounts.find((x) => x.k === t.dataset.adStats); if (a) statsModal(a); }
         else if (t.dataset.adTier) tierEditor(t.dataset.adTier);
         else if (t.dataset.adSet) setEditor(t.dataset.adSet);
         else if (t.dataset.adAcc) { const a = accounts.find((x) => x.k === t.dataset.adAcc); if (a) deleteAccount(a); }
