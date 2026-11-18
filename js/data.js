@@ -107,13 +107,20 @@ The Big J Mythic`;
   };
 
   const CAT_BASE = Object.keys(CATS); // the built-in sets; the admin can add more
+  const CAT_DEF = {}; CAT_BASE.forEach(function (k) { CAT_DEF[k] = { hue: CATS[k].hue, blurb: CATS[k].blurb }; });
 
   function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
   function rng(seed) { let a = seed; return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
-  // Points each card is worth, by tier. A player's score is the sum over every different card they own.
+  // Points each card is worth, by tier. A player's score is the sum over every copy they own (skibidi copies count extra).
   const POINTS = [1, 3, 8, 20, 50, 125, 400];
   const W0 = [50, 28, 14, 5, 2, 0.8, 0.08], P0 = POINTS.slice(), C0 = Object.assign({}, TIER_COLOR);
+  const TIER_DEF = {}; TIER0.forEach(function (n, i) { TIER_DEF[n] = { color: C0[n], pts: P0[i], weight: W0[i] }; });
+  // Game-wide settings the admin can change. holoMult: a skibidi (holo) copy is worth this many times a normal copy's points.
+  const GS = { holoMult: 2 };
+  // Collection score: every copy counts. A skibidi copy is worth holoMult times as much.
+  function cardScore(c, e) { return c.pts * (e.n - e.h) + c.pts * GS.holoMult * e.h; }
+  function scoreOf(cards) { let t = 0; Object.keys(cards).forEach(function (id) { const c = BYID[id], e = cards[id]; if (c && e && e.n > 0) t += cardScore(c, e); }); return t; }
   const TIER_FX = [0, 1, 2, 3, 4, 5, 6]; // how fancy the reveal is (built-ins: their own index; custom rarities sit half a step above the one they follow)
   // Base chance weight of each tier for one card slot, before a difficulty's luck is applied to Rare and above.
   const BASE_WEIGHTS = W0.slice();
@@ -152,7 +159,7 @@ The Big J Mythic`;
   // Admin config (stored online by the admin page): { blocked: [{id,name}], edits: { cardId: {name,tier,cat} }, added: [{id,name,cat,tier}] }
   const isObj = function (x) { return x && typeof x === 'object' && !Array.isArray(x); };
   function cleanConfig(b) {
-    const o = { blocked: [], edits: {}, added: [], tiers: [], sets: [] };
+    const o = { blocked: [], edits: {}, added: [], tiers: [], sets: [], tierEdits: {}, setEdits: {}, events: [], settings: { holoMult: 2 } };
     if (!isObj(b)) return o;
     const nmOk = function (v, n) { v = String(v == null ? '' : v).replace(/\s+/g, ' ').trim(); return v.length >= 1 && v.length <= n && /^[A-Za-z0-9 ]+$/.test(v) ? v : null; };
     const tierNames = TIER0.slice(), catNames = CAT_BASE.slice();
@@ -167,6 +174,30 @@ The Big J Mythic`;
       tierNames.push(n);
       o.tiers.push({ name: n, color: /^#[0-9a-fA-F]{6}$/.test(x.color) ? x.color : '#ffffff', pts: Math.min(100000, Math.max(1, Math.round(+x.pts) || 1)), weight: Math.min(1000, Math.max(0.01, +x.weight || 1)), after: after });
     });
+    // Changes to the built-in rarities and sets
+    if (isObj(b.tierEdits)) TIER0.forEach(function (n) {
+      const e = b.tierEdits[n]; if (!isObj(e)) return; const r = {};
+      if (/^#[0-9a-fA-F]{6}$/.test(e.color)) r.color = e.color;
+      if (Number.isFinite(+e.pts) && e.pts !== null && e.pts !== '') r.pts = Math.min(100000, Math.max(0, Math.round(+e.pts)));
+      if (Number.isFinite(+e.weight) && e.weight !== null && e.weight !== '') r.weight = Math.min(1000, Math.max(0, +e.weight));
+      if (Object.keys(r).length) o.tierEdits[n] = r;
+    });
+    if (isObj(b.setEdits)) CAT_BASE.forEach(function (n) {
+      const e = b.setEdits[n]; if (!isObj(e)) return; const r = {};
+      if (Number.isFinite(+e.hue) && e.hue !== null && e.hue !== '') r.hue = ((Math.round(+e.hue) % 360) + 360) % 360;
+      if (typeof e.blurb === 'string') r.blurb = e.blurb.replace(/[\r\n\t]+/g, ' ').trim().slice(0, 90);
+      if (Object.keys(r).length) o.setEdits[n] = r;
+    });
+    if (isObj(b.settings) && Number.isFinite(+b.settings.holoMult)) o.settings.holoMult = Math.min(20, Math.max(1, +(+b.settings.holoMult).toFixed(2)));
+    // Power hours: a boost that makes cards more likely for a while. kind: 'weight' (how often the card drops) or 'holo' (skibidi chance).
+    if (Array.isArray(b.events)) b.events.slice(0, 30).forEach(function (x) {
+      if (!isObj(x) || typeof x.id !== 'string' || !/^[a-z0-9]{4,40}$/.test(x.id)) return;
+      const scope = ['all', 'rare', 'tier', 'set', 'card'].indexOf(x.scope) >= 0 ? x.scope : 'all', val = String(x.value == null ? '' : x.value).slice(0, 120);
+      if (scope === 'tier' && tierNames.indexOf(val) < 0) return; if (scope === 'set' && catNames.indexOf(val) < 0) return; if (scope === 'card' && !val) return;
+      const end = +x.end || 0; if (!(end > 0)) return;
+      o.events.push({ id: x.id, name: String(x.name == null ? '' : x.name).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 40) || 'Power hour', kind: x.kind === 'holo' ? 'holo' : 'weight', scope: scope, value: scope === 'all' || scope === 'rare' ? '' : val,
+        mult: Math.min(1000, Math.max(0.01, +(+x.mult).toFixed(3) || 2)), start: +x.start || 0, end: end });
+    });
     if (Array.isArray(b.blocked)) b.blocked.slice(0, 500).forEach(function (x) {
       if (x && typeof x.id === 'string' && /^[a-z0-9]{6,40}$/.test(x.id)) o.blocked.push({ id: x.id, name: String(x.name == null ? 'Player' : x.name).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 20) || 'Player' });
     });
@@ -175,6 +206,10 @@ The Big J Mythic`;
       if (typeof e.name === 'string' && e.name.trim()) r.name = e.name.replace(/[\r\n\t]+/g, ' ').trim().slice(0, 60);
       if (tierNames.indexOf(e.tier) >= 0) r.tier = e.tier;
       if (typeof e.cat === 'string' && catNames.indexOf(e.cat) >= 0) r.cat = e.cat;
+      if (e.pts !== undefined && e.pts !== null && e.pts !== '' && Number.isFinite(+e.pts)) r.pts = Math.min(1000000, Math.max(0, Math.round(+e.pts)));
+      if (e.w !== undefined && e.w !== null && e.w !== '' && Number.isFinite(+e.w)) r.w = Math.min(1000, Math.max(0, +(+e.w).toFixed(4)));
+      if (e.holo !== undefined && e.holo !== null && e.holo !== '' && Number.isFinite(+e.holo)) r.holo = Math.min(1, Math.max(0, +(+e.holo).toFixed(4)));
+      if (e.off) r.off = 1;
       o.edits[String(k).slice(0, 120)] = r;
     });
     if (Array.isArray(b.added)) b.added.slice(0, 500).forEach(function (a) {
@@ -191,8 +226,10 @@ The Big J Mythic`;
   // Puts the admin's custom sets and rarities into the live TIERS / CATS / weights, in place.
   function rebuildTiers() {
     Object.keys(CATS).forEach(function (k) { if (CAT_BASE.indexOf(k) < 0) delete CATS[k]; });
+    CAT_BASE.forEach(function (k) { const e = CONFIG.setEdits[k] || {}; CATS[k].hue = e.hue != null ? e.hue : CAT_DEF[k].hue; CATS[k].blurb = e.blurb != null && e.blurb !== '' ? e.blurb : CAT_DEF[k].blurb; });
     CONFIG.sets.forEach(function (x) { CATS[x.name] = { hue: x.hue, name: x.name, blurb: x.blurb || 'A custom set.', custom: true }; });
-    const L = TIER0.map(function (n, i) { return { name: n, color: C0[n], pts: P0[i], w: W0[i], fx: i }; });
+    GS.holoMult = CONFIG.settings.holoMult;
+    const L = TIER0.map(function (n, i) { const e = CONFIG.tierEdits[n] || {}; return { name: n, color: e.color || C0[n], pts: e.pts != null ? e.pts : P0[i], w: e.weight != null ? e.weight : W0[i], fx: i, edited: !!CONFIG.tierEdits[n] }; });
     CONFIG.tiers.forEach(function (x) {
       let at = -1; L.forEach(function (t, i) { if (t.name === x.after) at = i; });
       if (at < 0) at = L.length - 1;
@@ -204,7 +241,7 @@ The Big J Mythic`;
     BYTIER.length = 0; POOL.length = 0; TIERS.forEach(function () { BYTIER.push([]); POOL.push([]); });
     if (typeof document !== 'undefined') {
       let st = document.getElementById('ssg-tiers'); if (!st) { st = document.createElement('style'); st.id = 'ssg-tiers'; document.head.appendChild(st); }
-      st.textContent = ':root{' + L.filter(function (t) { return t.custom; }).map(function (t) { return '--t-' + slug(t.name) + ':' + t.color + ';'; }).join('') + '}' + L.filter(function (t) { return t.custom; }).map(function (t) {
+      st.textContent = ':root{' + L.filter(function (t) { return t.custom || t.color !== C0[t.name]; }).map(function (t) { return '--t-' + slug(t.name) + ':' + t.color + ';'; }).join('') + '}' + L.filter(function (t) { return t.custom; }).map(function (t) {
         const c = 'var(--t-' + slug(t.name) + ')', k = '.t-' + slug(t.name);
         return k + ' .tier-text,.tier-text' + k + '{color:' + c + '}.card' + k + ',.special' + k + ',.unit' + k + '{--tc:' + c + '}.slot.revealed' + k + ' .flipper{filter:drop-shadow(0 0 20px ' + c + ')}.idx-item' + k + ' .dot{background:' + c + '}.tier-prog>' + k + '{--tc:' + c + '}';
       }).join('');
@@ -213,13 +250,14 @@ The Big J Mythic`;
   function rebuild() {
     rebuildTiers();
     const list = [], seen = {};
-    BASE.forEach(function (b) { const e = CONFIG.edits[b.id] || {}; seen[b.id] = 1; list.push({ id: b.id, name: e.name || b.name, cat: e.cat || b.cat, tier: e.tier || b.tier, custom: false, img: CONFIG_IMAGES[b.id] || IMAGES[b.id] || null }); });
-    CONFIG.added.forEach(function (a) { if (seen[a.id]) return; seen[a.id] = 1; const e = CONFIG.edits[a.id] || {}; list.push({ id: a.id, name: e.name || a.name, cat: e.cat || a.cat, tier: e.tier || a.tier, custom: true, img: CONFIG_IMAGES[a.id] || null }); });
+    const extra = function (e) { return { ptsOv: e.pts != null ? e.pts : null, wm: e.w != null ? e.w : 1, holoOv: e.holo != null ? e.holo : null, off: !!e.off, edited: Object.keys(e).length > 0 }; };
+    BASE.forEach(function (b) { const e = CONFIG.edits[b.id] || {}; seen[b.id] = 1; list.push(Object.assign({ id: b.id, name: e.name || b.name, cat: e.cat || b.cat, tier: e.tier || b.tier, custom: false, img: CONFIG_IMAGES[b.id] || IMAGES[b.id] || null, base: b }, extra(e))); });
+    CONFIG.added.forEach(function (a) { if (seen[a.id]) return; seen[a.id] = 1; const e = CONFIG.edits[a.id] || {}; list.push(Object.assign({ id: a.id, name: e.name || a.name, cat: e.cat || a.cat, tier: e.tier || a.tier, custom: true, img: CONFIG_IMAGES[a.id] || null, base: a }, extra(e))); });
     CARDS.length = 0; Object.keys(BYID).forEach(function (k) { delete BYID[k]; });
     MONSTER_POOL.length = 0;
     list.forEach(function (c) {
-      c.ti = TIERS.indexOf(c.tier); c.fx = TIER_FX[c.ti]; c.pts = POINTS[c.ti]; c.monster = !!CATS[c.cat].monster;
-      CARDS.push(c); BYID[c.id] = c; BYTIER[c.ti].push(c); if (c.monster) MONSTER_POOL.push(c); else POOL[c.ti].push(c);
+      c.ti = TIERS.indexOf(c.tier); c.fx = TIER_FX[c.ti]; c.pts = c.ptsOv != null ? c.ptsOv : POINTS[c.ti]; c.monster = !!CATS[c.cat].monster;
+      CARDS.push(c); BYID[c.id] = c; BYTIER[c.ti].push(c); if (!c.off) { if (c.monster) MONSTER_POOL.push(c); else POOL[c.ti].push(c); }
     });
     // Rank 1 = hardest to pull. Ties break by set order, then name.
     const catOrder = Object.keys(CATS);
@@ -251,6 +289,12 @@ The Big J Mythic`;
     MGJ:   { packs: 10, note: 'The Big three' }
   };
 
-  window.SSG = { applyConfig: applyConfig, cleanConfig: cleanConfig, getConfig: function () { return CONFIG; }, BASE: BASE, TIERS: TIERS, TIER_COLOR: TIER_COLOR, CATS: CATS, CARDS: CARDS, BYID: BYID, BYTIER: BYTIER, POOL: POOL, MONSTER_POOL: MONSTER_POOL, MONSTER_CHANCE: MONSTER_CHANCE,
+  // ---- power hours ----
+  // Every running event whose scope matches the card multiplies its drop weight (kind 'weight') or its skibidi chance (kind 'holo').
+  function eventsNow(now) { now = now || Date.now(); return CONFIG.events.filter(function (e) { return e.start <= now && e.end > now; }); }
+  function evHit(e, c) { return e.scope === 'all' || (e.scope === 'rare' && c.fx >= 2) || (e.scope === 'tier' && c.tier === e.value) || (e.scope === 'set' && c.cat === e.value) || (e.scope === 'card' && c.id === e.value); }
+  function eventMult(c, kind, now) { let m = 1; eventsNow(now).forEach(function (e) { if (e.kind === (kind || 'weight') && evHit(e, c)) m *= e.mult; }); return m; }
+
+  window.SSG = { GS: GS, TIER_DEF: TIER_DEF, CAT_DEF: CAT_DEF, cardScore: cardScore, scoreOf: scoreOf, eventsNow: eventsNow, eventMult: eventMult, evHit: evHit, applyConfig: applyConfig, cleanConfig: cleanConfig, getConfig: function () { return CONFIG; }, BASE: BASE, TIERS: TIERS, TIER_COLOR: TIER_COLOR, CATS: CATS, CARDS: CARDS, BYID: BYID, BYTIER: BYTIER, POOL: POOL, MONSTER_POOL: MONSTER_POOL, MONSTER_CHANCE: MONSTER_CHANCE,
     BASE_WEIGHTS: BASE_WEIGHTS, TIER_FX: TIER_FX, TIER0: TIER0, CAT_BASE: CAT_BASE, SELL: SELL, POINTS: POINTS, CODES: CODES, DIFFS: DIFFS, hash: hash, rng: rng };
 })();

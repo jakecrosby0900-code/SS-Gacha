@@ -33,7 +33,11 @@ Nobody can play until they are signed in (`js/auth.js`). Accounts use the same G
 Settings > Admin: log in with the admin username and password, then open the Admin page (`js/admin.js`). It can:
 - list every account with its leaderboard stats: give it cards or packs, or take away chosen cards or all of them, change the packs-opened number, (applied the next time that player is online), remove it from the leaderboard, restore it (or restore everyone at once), or delete it,
 - add custom rarities (name, colour, points, drop weight, where it sits in the order) and custom sets,
-- add new cards, edit any card's name, set and rarity, and upload card pictures.
+- add new cards and edit **any** card (built-in or custom): name, set, rarity, points, drop-weight multiplier or an exact chance per slot, skibidi chance, on/off, picture; tick several cards to change rarity/set/weight/on-off in bulk, or edit rarity/set inline in the list,
+- edit every rarity and set (colour, points, drop weight, set colour/blurb), with Reset for built-in ones,
+- start **power hours** (more-likely cards or higher skibidi chance for a set time; players see a banner), set the skibidi points multiplier, give a gift to everyone, back up / restore settings, and undo the last change.
+
+Scoring: every copy counts, a skibidi copy is worth the multiplier (default 2x). Monster cards use their rarity's normal drop weight while the monster is enabled.
 
 Changes are saved online (a `config:game` issue, plus one `cardimg` issue per uploaded picture), so every player sees them. Do not close or edit those issues by hand. The leaderboard Action reads the config too, so removed players stay off `data/leaderboard.json`.
 The admin login is stored only as a salted hash in `js/admin.js`. To change it, run this in Node and paste the new `salt` and `hash` into `ADMIN`:

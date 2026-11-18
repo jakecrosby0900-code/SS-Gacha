@@ -25,8 +25,8 @@ footer.site{color:var(--muted);text-align:center;padding:30px 20px;font-size:.85
 /* 3D cards: tilt, depth, glare, dynamic shadow */
 .card-btn{perspective:none}
 .card{--px:0;--py:0;--sx:0px;--sy:6px;--s:1;transform:perspective(650px) rotateX(var(--rx)) rotateY(var(--ry)) scale(var(--s));transition:transform .6s cubic-bezier(.2,.9,.2,1),box-shadow .4s;box-shadow:0 8px 22px rgba(0,0,0,.5),0 0 16px color-mix(in srgb,var(--tc) 25%,transparent)}
-.card.tilting{--s:1.08;transition:transform .09s ease-out,box-shadow .3s;box-shadow:var(--sx) var(--sy) 34px rgba(0,0,0,.6),0 0 30px color-mix(in srgb,var(--tc) 60%,transparent);}
-.card::after{content:"";position:absolute;inset:0;pointer-events:none;z-index:6;opacity:0;transition:opacity .3s;background:radial-gradient(circle at var(--mx) var(--my),rgba(255,255,255,.42),transparent 55%);mix-blend-mode:soft-light}
+.card.tilting{--s:1.08;transition:transform .09s ease-out,box-shadow .3s;box-shadow:var(--sx) var(--sy) 34px rgba(0,0,0,.6),0 0 22px color-mix(in srgb,var(--tc) 28%,transparent);}
+.card::after{content:"";position:absolute;inset:0;pointer-events:none;z-index:6;opacity:0;transition:opacity .3s;background:radial-gradient(circle at var(--mx) var(--my),rgba(255,255,255,.1),transparent 45%);mix-blend-mode:soft-light}
 .card.tilting::after{opacity:1}
 /* polish */
 html{scroll-behavior:smooth}::selection{background:var(--accent2);color:#fff}

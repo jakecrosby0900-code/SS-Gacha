@@ -31,7 +31,7 @@ for (const i of issues.sort((a, b) => a.number - b.number)) {
   let score = 0, unique = 0, skibidi = 0, best = null;
   for (const [id, a] of Object.entries(b.cards || {})) {
     const c = BYID[id]; if (!c || !(a[0] > 0)) continue;
-    unique++; score += c.pts; if (a[1] > 0) skibidi++;
+    unique++; score += G.cardScore(c, { n: a[0] | 0, h: Math.min(a[0] | 0, a[1] | 0) }); if (a[1] > 0) skibidi++;
     if (!best || c.ti > best.ti || (c.ti === best.ti && c.rank < best.rank)) best = c;
   }
   players.push({ id: b.id, name: String(b.name || 'Player').slice(0, 20), hue: b.hue, pfp: typeof b.pfp === 'string' && b.pfp.length < 30000 ? b.pfp : null,

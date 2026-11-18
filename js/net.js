@@ -50,7 +50,7 @@
     // ---------- reading other players ----------
     function derive(p) {
       let score = 0, unique = 0, sk = 0, best = null;
-      Object.keys(p.cards).forEach((id) => { const c = BYID[id], e = p.cards[id]; unique++; score += c.pts; if (e.h > 0) sk++; if (!best || c.ti > best.ti || (c.ti === best.ti && c.rank < best.rank)) best = c; });
+      Object.keys(p.cards).forEach((id) => { const c = BYID[id], e = p.cards[id]; unique++; score += G.cardScore(c, e); if (e.h > 0) sk++; if (!best || c.ti > best.ti || (c.ti === best.ti && c.rank < best.rank)) best = c; });
       p.score = score; p.unique = unique; p.skibidi = sk; p.rarest = best ? best.name : null;
       return p;
     }
@@ -61,11 +61,11 @@
       return derive({ id: id, name: nm(b.name), hue: Number.isFinite(+b.hue) ? ((+b.hue % 360) + 360) % 360 : 28, pfp: okImg(b.pfp), banner: okImg(b.banner), joined: +b.joined || 0, seen: +b.seen || 0,
         mod: +(b.save && b.save.mod) || +b.seen || 0, opened: +(b.opened) || 0, pulls: +(b.pulls) || 0, cards: cards, num: num, full: true, raw: b.save && typeof b.save === 'object' ? b.save : null });
     }
-    const items = (a) => (Array.isArray(a) ? a.slice(0, 12).map((x) => ({ id: String(x && x.id), h: x && x.h ? 1 : 0 })).filter((x) => BYID[x.id]) : []);
+    const items = (a) => (Array.isArray(a) ? a.slice(0, 60).map((x) => ({ id: String(x && x.id), h: x && x.h ? 1 : 0 })).filter((x) => BYID[x.id]) : []);
     function cleanTrade(b, num) {
       const tid = idOk(b.id), f = b.from || {}, t = b.to || {};
       if (!tid || !idOk(f.id) || !idOk(t.id)) return null;
-      return { id: tid, num: num, from: { id: f.id, name: nm(f.name) }, to: { id: t.id, name: nm(t.name) }, give: items(b.give), want: items(b.want), at: +b.at || 0,
+      return { id: tid, num: num, from: { id: f.id, name: nm(f.name) }, to: { id: t.id, name: nm(t.name) }, give: items(b.give), want: items(b.want), msg: String(b.msg == null ? '' : b.msg).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 140), at: +b.at || 0,
         status: ['open', 'accepted', 'declined', 'cancelled'].indexOf(b.status) >= 0 ? b.status : 'open' };
     }
     // ---------- admin config (card edits, new cards, removed players) ----------
@@ -123,6 +123,7 @@
     async function updateConfig(fn) {
       const c = conf(); let cfg = G.cleanConfig(null);
       if (net.cfgNum) { try { const cur = await gh('GET', `/repos/${c.repo}/issues/${net.cfgNum}`); cfg = G.cleanConfig(JSON.parse(cur.body)); } catch (e) { if (e.status && e.status !== 404 && e.status !== 410) throw e; } }
+      try { localStorage.setItem('ss-gacha-cfg-undo', JSON.stringify(cfg)); } catch (e) { /* ignore */ } // what "Undo last change" goes back to
       fn(cfg); cfg = G.cleanConfig(cfg);
       const body = JSON.stringify(Object.assign({ t: 'config', v: 1 }, cfg));
       if (body.length > MAX_BODY) throw new Error('Config is too big for one GitHub issue');
@@ -220,7 +221,9 @@
     const closedGrants = {};
     function applyGrants() {
       const s = S(); if (!s.account || ctx.busy()) return false; let any = false;
-      net.grants.filter((g) => g.k === s.account).forEach((g) => {
+      const mine = net.accounts.find((a) => a.k === s.account);
+      // k '*' = a gift for everyone (only accounts that existed when it was sent, for 14 days).
+      net.grants.filter((g) => g.k === s.account || (g.k === '*' && mine && mine.created <= g.at && Date.now() - g.at < 1209600000)).forEach((g) => {
         if (s.granted[g.gid]) return;
         g.cards.forEach((it) => { for (let i = 0; i < it.n; i++) ctx.addCopy(it.id, it.h); });
         if (g.packs) s.packs += g.packs;
@@ -238,7 +241,7 @@
     async function closeGrants() {
       const s = S(), c = conf();
       // Removals stay open for 3 days so a second, out-of-date device also applies them instead of bringing the cards back.
-      for (const g of net.grants.filter((x) => x.k === s.account && s.granted[x.gid] && !closedGrants[x.num] && (!(x.wipe || x.take.length || x.opened != null) || Date.now() - x.at > 259200000))) { closedGrants[g.num] = 1; try { await gh('PATCH', `/repos/${c.repo}/issues/${g.num}`, { state: 'closed' }); } catch (e) { /* retried after a reload */ } }
+      for (const g of net.grants.filter((x) => (x.k === s.account || x.k === '*') && s.granted[x.gid] && !closedGrants[x.num] && ((x.k !== '*' && !(x.wipe || x.take.length || x.opened != null)) || Date.now() - x.at > (x.k === '*' ? 1209600000 : 259200000)))) { closedGrants[g.num] = 1; try { await gh('PATCH', `/repos/${c.repo}/issues/${g.num}`, { state: 'closed' }); } catch (e) { /* retried after a reload */ } }
     }
     // Upload soon after any change instead of waiting for the next 60 second cycle.
     let touchT = 0;
@@ -257,7 +260,9 @@
     }
 
     // ---------- trading ----------
-    const names = (a) => a.map((it) => BYID[it.id].name + (it.h ? ' (skibidi)' : '')).join(', ');
+    // Trade lists hold one entry per copy; group them for display ("Freddy ×3").
+    const group = (list) => { const m = {}, o = []; list.forEach((it) => { const k = it.id + '|' + it.h; if (!m[k]) { m[k] = { id: it.id, h: it.h, n: 0 }; o.push(m[k]); } m[k].n++; }); return o; };
+    const names = (a) => group(a).map((it) => BYID[it.id].name + (it.h ? ' (skibidi)' : '') + (it.n > 1 ? ' ×' + it.n : '')).join(', ');
     function hist(text) { const h = S().net.hist; h.unshift({ at: Date.now(), text: text }); h.length = Math.min(h.length, 30); }
     const incoming = () => net.trades.filter((t) => t.status === 'open' && t.to.id === S().profile.id && !S().net.done[t.id]);
     const outgoing = () => Object.keys(S().net.out).map((tid) => Object.assign({ id: tid }, S().net.out[tid], { live: net.trades.find((t) => t.id === tid) }));
@@ -290,15 +295,16 @@
       }
       if (wrote) ctx.save();
     }
-    async function createTrade(toId, give, want) {
+    async function createTrade(toId, give, want, msg) {
       const s = S(), c = conf(), to = net.dir.find((p) => p.id === toId);
       if (!to) throw new Error('Player not found');
       if (!give.length && !want.length) throw new Error('Pick at least one card');
       give.forEach((it) => { if (!ctx.hasCopy(it.id, it.h)) throw new Error('You no longer own ' + BYID[it.id].name); });
       const tid = ctx.uid().replace(/[^a-z0-9]/g, '');
       give.forEach((it) => ctx.takeCopy(it.id, it.h));
-      s.net.out[tid] = { to: toId, toName: to.name, give: give, want: want, at: Date.now(), num: 0 }; ctx.save();
-      const body = { t: 'trade', id: tid, from: { id: s.profile.id, name: s.profile.name }, to: { id: to.id, name: to.name }, give: give, want: want, status: 'open', at: Date.now() };
+      msg = String(msg || '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 140);
+      s.net.out[tid] = { to: toId, toName: to.name, give: give, want: want, msg: msg, at: Date.now(), num: 0 }; ctx.save();
+      const body = { t: 'trade', id: tid, from: { id: s.profile.id, name: s.profile.name }, to: { id: to.id, name: to.name }, give: give, want: want, msg: msg, status: 'open', at: Date.now() };
       const issue = { title: `trade:${tid} ${s.profile.name} → ${to.name}`.replace(/[\r\n]+/g, ' '), body: JSON.stringify(body) };
       try {
         const r = await gh('POST', `/repos/${c.repo}/issues`, issue);
@@ -397,7 +403,7 @@
       $('#main').innerHTML = ctx.profileHTML(p, p.cards, { opened: p.opened }, actions, true, { score: p.score, unique: p.unique, skibidi: p.skibidi, rarest: p.rarest, lite: !p.full, online: online(p), acct: p.acct });
       $$('.card', $('#main')).forEach(ctx.tilt);
     }
-    const mini = (list) => `<div class="tr-cards">${list.length ? list.map((it) => `<div class="tr-card">${ctx.cardHTML(BYID[it.id], { holo: !!it.h, size: 84 })}</div>`).join('') : '<span class="muted small">nothing</span>'}</div>`;
+    const mini = (list) => `<div class="tr-cards">${list.length ? group(list).map((it) => `<div class="tr-card">${ctx.cardHTML(BYID[it.id], { holo: !!it.h, count: it.n, size: 84 })}</div>`).join('') : '<span class="muted small">nothing</span>'}</div>`;
     function pageTrades() {
       $('#main').innerHTML = `<div class="row wrap between"><h1>Trades</h1><button class="btn primary" data-net="trade" ${enabled() ? '' : 'disabled'}>⇄ New trade</button></div><p class="muted" id="plstatus"></p><div id="trlist"></div>`;
       drawTrades(); paint(); if (Date.now() - net.last > 20000) cycle();
@@ -408,10 +414,10 @@
       const s = S(), inc = incoming(), out = outgoing();
       box.innerHTML = `<section><h2>Offers for you <span class="muted small">${inc.length}</span></h2>${inc.length ? inc.map((t) => {
           const ok = t.want.every((it) => ctx.hasCopy(it.id, it.h));
-          return `<div class="panel tr-offer"><div class="tr-head"><b>${esc(t.from.name)}</b> <span class="muted">offers</span></div>${mini(t.give)}<div class="tr-head"><span class="muted">${t.want.length ? 'and wants' : 'as a gift'}</span></div>${t.want.length ? mini(t.want) : ''}
+          return `<div class="panel tr-offer"><div class="tr-head"><b>${esc(t.from.name)}</b> <span class="muted">offers</span></div>${t.msg ? `<p class="tr-msg">“${esc(t.msg)}”</p>` : ''}${mini(t.give)}<div class="tr-head"><span class="muted">${t.want.length ? 'and wants' : 'as a gift'}</span></div>${t.want.length ? mini(t.want) : ''}
             <div class="row wrap"><button class="btn primary" data-net="accept" data-id="${t.id}" ${ok ? '' : 'disabled'}>Accept</button><button class="btn" data-net="decline" data-id="${t.id}">Decline</button>${ok ? '' : '<span class="muted small">You do not have the cards they want.</span>'}</div></div>`;
         }).join('') : '<div class="empty"><p>No offers right now.</p></div>'}</section>
-        <section><h2>Your offers <span class="muted small">${out.length}</span></h2>${out.length ? out.map((o) => `<div class="panel tr-offer"><div class="tr-head">To <b>${esc(o.toName)}</b> <span class="muted small">· waiting for an answer · your cards are held until it is settled</span></div>${mini(o.give)}<div class="tr-head"><span class="muted">${o.want.length ? 'for' : 'as a gift'}</span></div>${o.want.length ? mini(o.want) : ''}
+        <section><h2>Your offers <span class="muted small">${out.length}</span></h2>${out.length ? out.map((o) => `<div class="panel tr-offer"><div class="tr-head">To <b>${esc(o.toName)}</b> <span class="muted small">· waiting for an answer · your cards are held until it is settled</span></div>${o.msg ? `<p class="tr-msg">“${esc(o.msg)}”</p>` : ''}${mini(o.give)}<div class="tr-head"><span class="muted">${o.want.length ? 'for' : 'as a gift'}</span></div>${o.want.length ? mini(o.want) : ''}
           <div class="row wrap"><button class="btn" data-net="cancel" data-id="${o.id}">Cancel offer</button></div></div>`).join('') : '<div class="empty"><p>You have no offers out.</p></div>'}</section>
         <section><h2>History</h2>${s.net.hist.length ? `<ul class="tr-hist">${s.net.hist.map((h) => `<li><span class="muted small">${new Date(h.at).toLocaleString('en-GB')}</span> ${esc(h.text)}</li>`).join('')}</ul>` : '<div class="empty"><p>Nothing yet.</p></div>'}</section>`;
     }
@@ -420,26 +426,40 @@
       if (!enabled()) { toast('Add a GitHub token in Settings first', true); return; }
       const s = S(), others = net.dir.filter((p) => !isMe(p) && p.full);
       if (!others.length) { toast('No other players are online yet', true); return; }
-      const st = { to: others.some((p) => p.id === pre) ? pre : others[0].id, give: {}, want: {} };
+      const st = { to: others.some((p) => p.id === pre) ? pre : others[0].id, give: {}, want: {} }, MAXN = 60;
       const bg = ctx.modal(`<h2>New trade</h2><label class="f">Trade with<select id="trTo">${others.map((p) => `<option value="${p.id}" ${p.id === st.to ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
         <div class="tr-cols"><div><h3>You give <span class="muted small" id="trGn"></span></h3><div id="trGive" class="tr-pick"></div></div>
         <div><h3>You get <span class="muted small" id="trWn"></span></h3><p class="muted small">Pick nothing to send a gift.</p><div id="trWant" class="tr-pick"></div></div></div>
+        <label class="f" style="margin-top:12px">Message (optional)<textarea id="trMsg" maxlength="140" rows="2" placeholder="Say something with your offer..."></textarea></label>
         <div class="row wrap" style="margin-top:14px"><button class="btn primary" id="trSend" type="button">Send offer</button><button class="btn" data-act="close-modal" type="button">Cancel</button></div>`, 'wide');
-      const tiles = (cards) => { const out = []; Object.keys(cards).sort((a, b) => BYID[a].rank - BYID[b].rank).forEach((id) => { const e = cards[id]; if (!BYID[id] || e.n <= 0) return; if (e.n - e.h > 0) out.push({ id: id, h: 0, n: e.n - e.h }); if (e.h > 0) out.push({ id: id, h: 1, n: e.h }); }); return out; };
+      // One entry per card, with a side tab listing its copy types so you can choose how many of each (normal or skibidi) to trade.
+      const entries = (cards) => Object.keys(cards).filter((id) => BYID[id] && cards[id].n > 0).sort((a, b) => BYID[a].rank - BYID[b].rank).map((id) => { const e = cards[id], v = []; if (e.n - e.h > 0) v.push({ h: 0, max: e.n - e.h }); if (e.h > 0) v.push({ h: 1, max: e.h }); return { id: id, v: v }; });
+      const total = (m) => Object.keys(m).reduce((a, k) => a + (m[k] || 0), 0);
       const fill = (el, list, sel, cnt) => {
-        el.innerHTML = list.length ? list.map((t) => `<button type="button" class="card-btn ${sel[t.id + '|' + t.h] ? 'picked' : ''}" data-k="${t.id}|${t.h}">${ctx.cardHTML(BYID[t.id], { holo: !!t.h, count: t.n, size: 84 })}</button>`).join('') : '<p class="muted small">Nothing to pick.</p>';
-        $(cnt, bg).textContent = Object.keys(sel).filter((k) => sel[k]).length ? `(${Object.keys(sel).filter((k) => sel[k]).length} picked)` : '';
+        el.innerHTML = list.length ? list.map((en) => { const picked = en.v.some((x) => sel[en.id + '|' + x.h]);
+          return `<div class="tr-item ${picked ? 'picked' : ''}"><button type="button" class="card-btn" data-add="${en.id}|${en.v[0].h}">${ctx.cardHTML(BYID[en.id], { holo: en.v.length === 1 && en.v[0].h === 1, size: 84 })}</button>
+          <div class="dupe-tab inline">${en.v.map((x) => { const k = en.id + '|' + x.h, n = sel[k] || 0; return `<div class="tr-var ${x.h ? 'holo' : ''}"><span>${x.h ? '✦ Skibidi' : 'Normal'} <small class="muted">own ${x.max}</small></span><span class="stepper"><button type="button" data-step="${k}|-1" aria-label="One fewer">−</button><b>${n}</b><button type="button" data-step="${k}|1" aria-label="One more">+</button><button type="button" class="all" data-step="${k}|all" title="All ${x.max}">All</button></span></div>`; }).join('')}</div></div>`; }).join('') : '<p class="muted small">Nothing to pick.</p>';
+        const t = total(sel); $(cnt, bg).textContent = t ? `(${t} card${t === 1 ? '' : 's'})` : '';
       };
+      const maxOf = (cards, k) => { const [id, h] = k.split('|'), e = cards[id]; return e ? (h === '1' ? e.h : e.n - e.h) : 0; };
       const draw = () => { const them = net.dir.find((p) => p.id === st.to);
-        fill($('#trGive', bg), tiles(s.cards), st.give, '#trGn'); fill($('#trWant', bg), them ? tiles(them.cards) : [], st.want, '#trWn'); };
+        fill($('#trGive', bg), entries(s.cards), st.give, '#trGn'); fill($('#trWant', bg), them ? entries(them.cards) : [], st.want, '#trWn'); };
       draw();
       $('#trTo', bg).onchange = (e) => { st.to = e.target.value; st.want = {}; draw(); };
-      const click = (key) => (e) => { const b = e.target.closest('[data-k]'); if (!b) return; st[key][b.dataset.k] = !st[key][b.dataset.k]; draw(); };
+      const click = (key) => (e) => {
+        const cards = key === 'give' ? s.cards : (net.dir.find((p) => p.id === st.to) || { cards: {} }).cards, sel = st[key];
+        const add = e.target.closest('[data-add]'), stp = e.target.closest('[data-step]');
+        if (add) { const k = add.dataset.add; sel[k] = Math.min(maxOf(cards, k), (sel[k] || 0) + 1); }
+        else if (stp) { const parts = stp.dataset.step.split('|'), k = parts[0] + '|' + parts[1], d = parts[2], max = maxOf(cards, k); const cur = sel[k] || 0; sel[k] = d === 'all' ? max : Math.max(0, Math.min(max, cur + +d)); if (total(sel) > MAXN) sel[k] -= total(sel) - MAXN; if (!sel[k]) delete sel[k]; }
+        else return;
+        if (add && total(sel) > MAXN) { sel[add.dataset.add]--; toast('You can trade up to ' + MAXN + ' cards at once', true); }
+        draw();
+      };
       $('#trGive', bg).onclick = click('give'); $('#trWant', bg).onclick = click('want');
       $('#trSend', bg).onclick = async () => {
-        const conv = (m) => Object.keys(m).filter((k) => m[k]).map((k) => { const [id, h] = k.split('|'); return { id: id, h: +h }; });
+        const conv = (m) => { const out = []; Object.keys(m).forEach((k) => { const [id, h] = k.split('|'); for (let i = 0; i < m[k]; i++) out.push({ id: id, h: +h }); }); return out; };
         const btn = $('#trSend', bg); btn.disabled = true;
-        try { await createTrade(st.to, conv(st.give), conv(st.want)); ctx.closeModal(bg); toast('Offer sent'); location.hash = '#trades'; if (location.hash === '#trades') drawTrades(); }
+        try { await createTrade(st.to, conv(st.give), conv(st.want), $('#trMsg', bg).value); ctx.closeModal(bg); toast('Offer sent'); location.hash = '#trades'; if (location.hash === '#trades') drawTrades(); }
         catch (e) { toast(e.message, true); btn.disabled = false; }
       };
     }
