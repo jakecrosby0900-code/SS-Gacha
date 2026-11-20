@@ -13,7 +13,8 @@
     const G = ctx.G, BYID = G.BYID, CARDS = G.CARDS, esc = ctx.esc, $ = ctx.$, $$ = ctx.$$;
     const S = () => ctx.S();
     const LS = 'ss-gacha-net', EVERY = 60000, ONLINE_MS = 150000, BEAT_MS = 240000, MAX_BODY = 64000;
-    const net = { dir: [], trades: [], accounts: [], grants: [], cfg: G.cleanConfig(null), cfgNum: 0, imgNum: {}, cfgKey: '', status: 'off', msg: '', last: 0, busy: false, lastKey: '', lastBeat: 0, createdAt: 0, loaded: false, cfgChanged: false };
+    const net = { dir: [], trades: [], accounts: [], grants: [], redeems: [], board: [], cfg: G.cleanConfig(null), cfgNum: 0, imgNum: {}, cfgKey: '', status: 'off', msg: '', last: 0, busy: false, lastKey: '', lastBeat: 0, createdAt: 0, loaded: false, cfgChanged: false };
+    const BOARD_MS = 7 * 86400000, BOARD_MAX = 3;
     const CFG_CACHE = 'ss-gacha-cfg';
     const view = { by: 'score', q: '' };
     const okImg = (v) => (typeof v === 'string' && /^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(v) && v.length < 200000 ? v : null);
@@ -48,6 +49,8 @@
     }
 
     // ---------- reading other players ----------
+    // Monday 00:00 UTC of the week containing t: the leaderboard's "this week" tab resets then.
+    const weekStart = (t) => { const d = new Date(t), day = (d.getUTCDay() + 6) % 7; return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day); };
     function derive(p) {
       let score = 0, unique = 0, sk = 0, best = null;
       Object.keys(p.cards).forEach((id) => { const c = BYID[id], e = p.cards[id]; unique++; score += G.cardScore(c, e); if (e.h > 0) sk++; if (!best || c.ti > best.ti || (c.ti === best.ti && c.rank < best.rank)) best = c; });
@@ -58,8 +61,13 @@
       const id = idOk(b.id); if (!id) return null;
       const cards = {};
       if (b.cards && typeof b.cards === 'object') Object.keys(b.cards).forEach((cid) => { const a = b.cards[cid]; if (BYID[cid] && Array.isArray(a) && +a[0] > 0) { const n = Math.min(9999, +a[0] | 0); cards[cid] = { n: n, h: Math.min(n, Math.max(0, +a[1] | 0)), f: a[2] ? 1 : 0, t: +a[3] || 0, l: +a[4] || 0 }; } });
-      return derive({ id: id, name: nm(b.name), hue: Number.isFinite(+b.hue) ? ((+b.hue % 360) + 360) % 360 : 28, pfp: okImg(b.pfp), banner: okImg(b.banner), joined: +b.joined || 0, seen: +b.seen || 0,
+      const wish = Array.isArray(b.wish) ? b.wish.filter((x) => typeof x === 'string' && BYID[x]).slice(0, 300) : [];
+      const wk = b.wk && +b.wk.t === weekStart(Date.now()) ? Math.max(0, +b.wk.s || 0) : null;
+      const pl = derive({ id: id, name: nm(b.name), hue: Number.isFinite(+b.hue) ? ((+b.hue % 360) + 360) % 360 : 28, pfp: okImg(b.pfp), banner: okImg(b.banner), joined: +b.joined || 0, seen: +b.seen || 0,
         mod: +(b.save && b.save.mod) || +b.seen || 0, opened: +(b.opened) || 0, pulls: +(b.pulls) || 0, cards: cards, num: num, full: true, raw: b.save && typeof b.save === 'object' ? b.save : null });
+      pl.show = Array.isArray(b.show) ? b.show.filter((x) => typeof x === 'string' && /\|[01]$/.test(x)).slice(0, 5) : [];
+      pl.wish = wish; pl.week = wk == null ? 0 : Math.max(0, pl.score - wk);
+      return pl;
     }
     const items = (a) => (Array.isArray(a) ? a.slice(0, 60).map((x) => ({ id: String(x && x.id), h: x && x.h ? 1 : 0 })).filter((x) => BYID[x.id]) : []);
     function cleanTrade(b, num) {
@@ -91,7 +99,7 @@
       const parsed = [];
       all.forEach((i) => { let b; try { b = JSON.parse(i.body); } catch (e) { return; } if (b && typeof b === 'object') parsed.push({ i: i, b: b }); });
       // 1) admin config, card pictures and accounts first, so custom cards exist before players are read
-      let cfgIssue = null; const imgs = {}, imgNum = {}, accounts = {}, grants = [];
+      let cfgIssue = null; const imgs = {}, imgNum = {}, accounts = {}, grants = [], redeems = [], seenRd = {}, board = [];
       parsed.forEach((x) => {
         const b = x.b, num = x.i.number;
         if (b.t === 'config') { if (!cfgIssue || num < cfgIssue.num) cfgIssue = { num: num, b: b }; }
@@ -101,16 +109,19 @@
           const tk = Array.isArray(b.take) ? b.take.slice(0, 120).map((x) => ({ id: String(x && x.id), h: x && x.h ? 1 : 0, n: Math.min(9999, Math.max(1, +(x && x.n) | 0 || 1)) })).filter((x) => BYID[x.id]) : [];
           grants.push({ gid: b.gid, k: b.k.toLowerCase(), num: num, cards: cs, take: tk, wipe: !!b.wipe, opened: b.opened == null || !Number.isFinite(+b.opened) ? null : Math.min(1000000, Math.max(0, Math.floor(+b.opened))), packs: Math.min(1000, Math.max(0, +b.packs | 0)), at: +b.at || 0 });
         }
+        else if (b.t === 'board' && idOk(b.pid)) { const ok = (a) => (Array.isArray(a) ? a.filter((x) => typeof x === 'string' && BYID[x]).slice(0, 5) : []), want = ok(b.want), offer = ok(b.offer); if ((want.length || offer.length) && Date.now() - (+b.at || 0) < BOARD_MS) board.push({ num: num, id: String(b.id || num).slice(0, 24), pid: b.pid, name: nm(b.name), want: want, offer: offer, note: String(b.note || '').replace(/[\r\n\t]+/g, ' ').slice(0, 100), at: +b.at || 0 }); }
+        else if (b.t === 'redeem' && typeof b.code === 'string' && idOk(b.pid)) { const k = b.pid + '|' + b.code; if (!seenRd[k]) { seenRd[k] = 1; redeems.push({ code: b.code.toUpperCase().slice(0, 24), pid: b.pid, name: nm(b.name), at: +b.at || 0 }); } }
         else if (b.t === 'account' && typeof b.k === 'string' && /^[a-z0-9_]{3,20}$/.test(b.k) && typeof b.salt === 'string' && typeof b.hash === 'string' && idOk(b.pid)) {
           if (!accounts[b.k] || accounts[b.k].num > num) accounts[b.k] = { k: b.k, u: String(b.u || b.k).slice(0, 20), salt: b.salt.slice(0, 64), hash: b.hash.slice(0, 128), iter: +b.iter || 0, pid: b.pid, created: +b.created || 0, num: num };
         }
       });
       net.cfgNum = cfgIssue ? cfgIssue.num : 0; net.imgNum = imgNum;
       applyCfg(cfgIssue ? cfgIssue.b : null, imgs); cacheCfg(imgs);
-      net.accounts = Object.keys(accounts).map((k) => accounts[k]); net.grants = grants;
+      net.accounts = Object.keys(accounts).map((k) => accounts[k]); net.grants = grants; net.redeems = redeems;
       const byPid = {}; net.accounts.forEach((a) => { byPid[a.pid] = a; });
       // 2) players and trades
       const blocked = {}; net.cfg.blocked.forEach((x) => { blocked[x.id] = 1; });
+      net.board = board.filter((x) => !blocked[x.pid]).sort((a, b) => b.at - a.at).slice(0, 200);
       const players = {}, trades = [];
       parsed.forEach((x) => {
         const b = x.b, num = x.i.number;
@@ -120,11 +131,14 @@
       net.dir = Object.keys(players).map((k) => { const p = players[k]; p.acct = byPid[p.id] ? byPid[p.id].u : null; return p; }); net.trades = trades; net.last = Date.now(); net.loaded = true;
     }
     // Admin writes. Re-reads the config issue first so two edits do not overwrite each other.
-    async function updateConfig(fn) {
+    async function updateConfig(fn, note) {
       const c = conf(); let cfg = G.cleanConfig(null);
       if (net.cfgNum) { try { const cur = await gh('GET', `/repos/${c.repo}/issues/${net.cfgNum}`); cfg = G.cleanConfig(JSON.parse(cur.body)); } catch (e) { if (e.status && e.status !== 404 && e.status !== 410) throw e; } }
       try { localStorage.setItem('ss-gacha-cfg-undo', JSON.stringify(cfg)); } catch (e) { /* ignore */ } // what "Undo last change" goes back to
-      fn(cfg); cfg = G.cleanConfig(cfg);
+      const before = JSON.parse(JSON.stringify(cfg)); fn(cfg); cfg = G.cleanConfig(cfg);
+      const NAMES = { edits: 'card edits', added: 'custom cards', tiers: 'custom rarities', sets: 'custom sets', tierEdits: 'rarity edits', setEdits: 'set edits', events: 'power hours', codes: 'codes', announce: 'announcements', blocked: 'leaderboard removals', settings: 'settings' };
+      const changed = Object.keys(NAMES).filter((k) => JSON.stringify(before[k]) !== JSON.stringify(cfg[k])).map((k) => NAMES[k]);
+      if (note || changed.length) cfg.log = [{ at: Date.now(), text: note || 'Changed ' + changed.join(', ') }].concat(cfg.log || []).slice(0, 100);
       const body = JSON.stringify(Object.assign({ t: 'config', v: 1 }, cfg));
       if (body.length > MAX_BODY) throw new Error('Config is too big for one GitHub issue');
       if (net.cfgNum) await gh('PATCH', `/repos/${c.repo}/issues/${net.cfgNum}`, { body: body });
@@ -132,6 +146,8 @@
       await refresh();
     }
     // dataUrl = null removes the custom picture.
+    // Records that this player used a code (so the admin can see usage and enforce limits).
+    function logRedeem(code) { const s = S(); return createIssue(`redeem:${code} ${s.profile.name}`.replace(/[\r\n]+/g, ' '), { t: 'redeem', code: code, pid: s.profile.id, name: s.profile.name, at: Date.now() }).catch(() => {}); }
     async function saveCardImage(id, dataUrl) {
       const c = conf(), num = net.imgNum[id];
       if (!dataUrl) { if (num) await gh('PATCH', `/repos/${c.repo}/issues/${num}`, { state: 'closed' }); }
@@ -162,8 +178,9 @@
     function build() {
       const s = S(), p = s.profile, cards = {};
       Object.keys(s.cards).forEach((id) => { const e = s.cards[id]; if (BYID[id] && e.n > 0) cards[id] = [e.n, e.h || 0, e.f ? 1 : 0, e.t || 0, e.l || 0]; });
-      return { t: 'player', v: 1, id: p.id, name: p.name, hue: p.hue, pfp: p.pfp, banner: p.banner, joined: p.joined, seen: Date.now(), opened: s.stats.opened, pulls: s.stats.pulls, cards: cards,
-        save: { mod: s.mod || 0, granted: s.granted, packs: s.packs, last: s.last, sinceRare: s.sinceRare, started: s.started, stats: s.stats, codes: s.codes, net: s.net } };
+      const ws = weekStart(Date.now()); if (!s.wk || s.wk.t < ws) s.wk = { t: ws, s: G.scoreOf(s.cards) };
+      return { t: 'player', v: 1, id: p.id, name: p.name, hue: p.hue, pfp: p.pfp, banner: p.banner, joined: p.joined, seen: Date.now(), opened: s.stats.opened, pulls: s.stats.pulls, cards: cards, wish: Object.keys(s.wish || {}).filter((x) => BYID[x]).slice(0, 300), wk: s.wk, show: s.showcase || [],
+        save: { wish: s.wish || {}, wk: s.wk, showcase: s.showcase || [], mod: s.mod || 0, granted: s.granted, packs: s.packs, last: s.last, sinceRare: s.sinceRare, started: s.started, stats: s.stats, codes: s.codes, net: s.net } };
     }
     // Uploads this device's save to the account's player issue. s.syncMod remembers which version the cloud holds, so a stale device can tell it must merge first.
     async function publish(force, keep) {
@@ -375,37 +392,48 @@
     }
 
     // ---------- pages ----------
-    const SORTS = [['score', 'Score'], ['unique', 'Unique cards'], ['opened', 'Packs opened'], ['skibidi', 'Skibidi cards'], ['seen', 'Recently online']];
+    const TABS = [['score', 'Most points'], ['unique', 'Most unique cards'], ['opened', 'Most packs opened'], ['week', 'This week']];
+    const shown = () => net.dir.filter((p) => p.acct || !net.accounts.length || !net.loaded || !enabled());
+    const rankOf = (p) => { const l = shown().slice().sort((a, b) => b.score - a.score || a.name.localeCompare(b.name)); return l.findIndex((x) => x.id === p.id) + 1; };
+    const leftText = (ms) => { const m = Math.max(1, Math.ceil(ms / 60000)), d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60); return d ? d + 'd ' + h + 'h' : h ? h + 'h ' + (m % 60) + 'm' : m + 'm'; };
     function pagePlayers() {
+      if (!TABS.some((t) => t[0] === view.by)) view.by = 'score';
       $('#main').innerHTML = `<h1>Leaderboard</h1><p class="muted" id="plstatus"></p>
-        <div class="filters panel"><label class="f">Find a player<input id="plq" type="search" value="${esc(view.q)}" placeholder="Name or username" autocomplete="off"></label>
-        <label class="f">Rank by<select id="plsort">${SORTS.map(([v, l]) => `<option value="${v}" ${view.by === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label></div><div id="pllist"></div>`;
+        <div class="lb-tabs" role="tablist">${TABS.map(([v, l]) => `<button type="button" role="tab" data-lb="${v}" aria-selected="${view.by === v}">${l}</button>`).join('')}</div>
+        <p class="muted small" id="lbnote"></p>
+        <div class="filters panel"><label class="f">Find a player<input id="plq" type="search" value="${esc(view.q)}" placeholder="Name or username" autocomplete="off"></label></div><div id="pllist"></div>`;
       $('#plq').oninput = (e) => { view.q = e.target.value; drawPlayers(); };
-      $('#plsort').onchange = (e) => { view.by = e.target.value; drawPlayers(); };
+      $$('[data-lb]').forEach((b) => { b.onclick = () => { view.by = b.dataset.lb; $$('[data-lb]').forEach((x) => x.setAttribute('aria-selected', String(x === b))); drawPlayers(); }; });
       drawPlayers(); paint(); if (Date.now() - net.last > 20000) cycle();
     }
     function drawPlayers() {
       const box = $('#pllist'); if (!box) return;
       const q = view.q.trim().toLowerCase(), key = view.by;
-      let list = net.dir.filter((p) => (p.acct || !net.accounts.length || !net.loaded || !enabled()) && (!q || p.name.toLowerCase().includes(q) || (p.acct || '').toLowerCase().includes(q)));
+      const note = $('#lbnote'); if (note) note.textContent = key === 'week' ? 'Points earned since Monday 00:00 UTC. Resets in ' + leftText(weekStart(Date.now()) + 604800000 - Date.now()) + '. Everyone starts the week on zero.' : '';
+      const byScore = shown().slice().sort((a, b) => b.score - a.score || a.name.localeCompare(b.name)), rk = {}; byScore.forEach((p, i) => { rk[p.id] = i + 1; });
+      let list = shown().filter((p) => !q || p.name.toLowerCase().includes(q) || (p.acct || '').toLowerCase().includes(q));
       list = list.slice().sort((a, b) => (b[key] - a[key]) || (b.score - a.score) || a.name.localeCompare(b.name));
-      const medal = ['🥇', '🥈', '🥉'];
-      box.innerHTML = list.length ? `<div class="pl-list">${list.map((p, i) => `<a class="pl-row ${isMe(p) ? 'me' : ''}" href="#user-${p.id}"><span class="pl-rank">${!q && i < 3 ? medal[i] : i + 1}</span>${ctx.avatarHTML(42, p)}
-          <span class="pl-name"><span class="pl-top"><b>${esc(p.name)}</b>${p.acct && p.acct.toLowerCase() !== p.name.toLowerCase() ? ` <small class="muted">@${esc(p.acct)}</small>` : ''}${isMe(p) ? ' <small class="muted">(you)</small>' : ''}${online(p) ? ' <span class="online-dot" title="Online now"></span>' : ''}</span><small class="muted">${p.unique}/${CARDS.length} cards · ${p.opened} packs · ${p.skibidi} skibidi</small></span>
-          <span class="pl-score"><b>${ctx.fmt(p.score)}</b><small>pts</small></span></a>`).join('')}</div>`
+      const medal = ['🥇', '🥈', '🥉'], big = (p) => key === 'week' ? '+' + ctx.fmt(p.week) : ctx.fmt(p[key]), unit = { score: 'pts', unique: 'cards', opened: 'packs', week: 'pts this week' }[key];
+      box.innerHTML = list.length ? `<div class="pl-list">${list.map((p, i) => `<a class="pl-row ${isMe(p) ? 'me' : ''}" href="#user-${p.id}"><span class="pl-rank">${!q && i < 3 && (key !== 'week' || p.week > 0) ? medal[i] : i + 1}</span>${ctx.avatarHTML(42, p)}
+          <span class="pl-name"><span class="pl-top"><b>${esc(p.name)}</b>${p.acct && p.acct.toLowerCase() !== p.name.toLowerCase() ? ` <small class="muted">@${esc(p.acct)}</small>` : ''}${isMe(p) ? ' <small class="muted">(you)</small>' : ''}${online(p) ? ' <span class="online-dot" title="Online now"></span>' : ''}<span class="pl-badges">${G.badgesOf(p.cards, p.opened, rk[p.id]).slice(0, 4).map((b) => `<span title="${esc(b.name)}">${b.ic}</span>`).join('')}</span></span><small class="muted">${p.unique}/${CARDS.length} cards · ${p.opened} packs<span class="hide-sm"> · ${p.skibidi} skibidi · ${ctx.fmt(p.score)} pts</span></small></span>
+          <span class="pl-score"><b>${big(p)}</b><small>${unit}</small></span></a>`).join('')}</div>`
         : `<div class="empty"><h2>${net.loaded ? 'No players found' : 'Loading...'}</h2><p class="muted">${net.loaded && !q ? 'Nobody has published a profile yet.' : ''}</p></div>`;
     }
     function pageUser(id) {
       const p = net.dir.find((x) => x.id === id);
       if (!p) { $('#main').innerHTML = `<div class="empty"><h2>${net.loaded ? 'Player not found' : 'Loading...'}</h2><p><a class="btn" href="#leaderboard">← Leaderboard</a></p></div>`; if (!net.loaded || Date.now() - net.last > 20000) cycle(); return; }
       const me = isMe(p), can = enabled() && !me && p.full;
-      const actions = `<a class="btn" href="#leaderboard">← Leaderboard</a>${me ? '<button class="btn" data-act="edit-profile">✎ Edit profile</button>' : ''}${can ? `<button class="btn primary" data-net="trade" data-id="${p.id}">⇄ Trade with ${esc(p.name)}</button>` : ''}`;
-      $('#main').innerHTML = ctx.profileHTML(p, p.cards, { opened: p.opened }, actions, true, { score: p.score, unique: p.unique, skibidi: p.skibidi, rarest: p.rarest, lite: !p.full, online: online(p), acct: p.acct });
+      const actions = `<a class="btn" href="#leaderboard">← Leaderboard</a>${me ? '<button class="btn" data-act="edit-profile">✎ Edit profile</button>' : ''}${can ? `<button class="btn primary" data-net="trade" data-id="${p.id}">⇄ Trade with ${esc(p.name)}</button><button class="btn" data-net="gift" data-id="${p.id}">🎁 Gift a card</button>` : ''}`;
+      const mine = S(), want = (p.wish || []).filter((id) => !(p.cards[id] && p.cards[id].n > 0)), theyHave = Object.keys(mine.wish || {}).filter((id) => p.cards[id] && p.cards[id].n > 0 && BYID[id]), iHave = want.filter((id) => mine.cards[id] && mine.cards[id].n > 0);
+      const thumbs = (ids) => `<div class="card-grid small">${ids.slice(0, 24).map((id) => `<button class="card-btn" data-act="card" data-id="${id}">${ctx.cardHTML(BYID[id], { size: 110, ghost: !mine.cards[id] })}</button>`).join('')}</div>`;
+      const matches = !me && p.full && (theyHave.length || iHave.length) ? `<section class="panel match"><h2>Trade matches</h2>${theyHave.length ? `<h3>${esc(p.name)} has ${theyHave.length} card${theyHave.length === 1 ? '' : 's'} on your wishlist</h3>${thumbs(theyHave)}` : ''}${iHave.length ? `<h3>You have ${iHave.length} card${iHave.length === 1 ? '' : 's'} on ${esc(p.name)}'s wishlist</h3>${thumbs(iHave)}` : ''}</section>` : '';
+      const wl = p.full && want.length ? `<section><h2>Wishlist <span class="muted small">${want.length} card${want.length === 1 ? '' : 's'} ${me ? 'you want' : 'they want'}</span></h2>${thumbs(want)}</section>` : '';
+      $('#main').innerHTML = ctx.profileHTML(p, p.cards, { opened: p.opened }, actions, true, { score: p.score, unique: p.unique, skibidi: p.skibidi, rarest: p.rarest, lite: !p.full, online: online(p), acct: p.acct, rank: rankOf(p), show: p.show }).replace('</section><section>', '</section>' + matches + '<section>') + wl;
       $$('.card', $('#main')).forEach(ctx.tilt);
     }
     const mini = (list) => `<div class="tr-cards">${list.length ? group(list).map((it) => `<div class="tr-card">${ctx.cardHTML(BYID[it.id], { holo: !!it.h, count: it.n, size: 84 })}</div>`).join('') : '<span class="muted small">nothing</span>'}</div>`;
     function pageTrades() {
-      $('#main').innerHTML = `<div class="row wrap between"><h1>Trades</h1><button class="btn primary" data-net="trade" ${enabled() ? '' : 'disabled'}>⇄ New trade</button></div><p class="muted" id="plstatus"></p><div id="trlist"></div>`;
+      $('#main').innerHTML = `<div class="row wrap between"><h1>Trades</h1><div class="row"><a class="btn" href="#board">📋 Trade board</a><button class="btn primary" data-net="trade" ${enabled() ? '' : 'disabled'}>⇄ New trade</button></div></div><p class="muted" id="plstatus"></p><div id="trlist"></div>`;
       drawTrades(); paint(); if (Date.now() - net.last > 20000) cycle();
     }
     function drawTrades() {
@@ -413,55 +441,141 @@
       if (!enabled()) { box.innerHTML = '<div class="panel"><h2>Trading needs GitHub</h2><p class="muted">Add a GitHub token in <a href="#options">Settings</a> (or ask whoever runs this site for the shared one) to trade with other players.</p></div>'; return; }
       const s = S(), inc = incoming(), out = outgoing();
       box.innerHTML = `<section><h2>Offers for you <span class="muted small">${inc.length}</span></h2>${inc.length ? inc.map((t) => {
-          const ok = t.want.every((it) => ctx.hasCopy(it.id, it.h));
+          const ok = t.want.every((it) => ctx.hasCopy(it.id, it.h)), val = (l) => l.reduce((a, it) => a + BYID[it.id].pts * (it.h ? G.GS.holoMult : 1), 0), gv = val(t.give), wv = val(t.want), bad = t.want.length && wv >= 1.5 * gv && wv - gv >= 50;
           return `<div class="panel tr-offer"><div class="tr-head"><b>${esc(t.from.name)}</b> <span class="muted">offers</span></div>${t.msg ? `<p class="tr-msg">“${esc(t.msg)}”</p>` : ''}${mini(t.give)}<div class="tr-head"><span class="muted">${t.want.length ? 'and wants' : 'as a gift'}</span></div>${t.want.length ? mini(t.want) : ''}
-            <div class="row wrap"><button class="btn primary" data-net="accept" data-id="${t.id}" ${ok ? '' : 'disabled'}>Accept</button><button class="btn" data-net="decline" data-id="${t.id}">Decline</button>${ok ? '' : '<span class="muted small">You do not have the cards they want.</span>'}</div></div>`;
+            ${t.want.length ? `<p class="tr-val ${bad ? 'warn' : ''}">You would get <b>${ctx.fmt(gv)}</b> pts and give <b>${ctx.fmt(wv)}</b> pts${bad ? ' · ⚠ this offer takes much more than it gives. Think before accepting, or counter it.' : ''}</p>` : ''}
+            <div class="row wrap"><button class="btn primary" data-net="accept" data-id="${t.id}" ${ok ? '' : 'disabled'}>Accept</button><button class="btn" data-net="counter" data-id="${t.id}">Counter-offer</button><button class="btn" data-net="decline" data-id="${t.id}">Decline</button>${ok ? '' : '<span class="muted small">You do not have the cards they want.</span>'}</div></div>`;
         }).join('') : '<div class="empty"><p>No offers right now.</p></div>'}</section>
         <section><h2>Your offers <span class="muted small">${out.length}</span></h2>${out.length ? out.map((o) => `<div class="panel tr-offer"><div class="tr-head">To <b>${esc(o.toName)}</b> <span class="muted small">· waiting for an answer · your cards are held until it is settled</span></div>${o.msg ? `<p class="tr-msg">“${esc(o.msg)}”</p>` : ''}${mini(o.give)}<div class="tr-head"><span class="muted">${o.want.length ? 'for' : 'as a gift'}</span></div>${o.want.length ? mini(o.want) : ''}
           <div class="row wrap"><button class="btn" data-net="cancel" data-id="${o.id}">Cancel offer</button></div></div>`).join('') : '<div class="empty"><p>You have no offers out.</p></div>'}</section>
         <section><h2>History</h2>${s.net.hist.length ? `<ul class="tr-hist">${s.net.hist.map((h) => `<li><span class="muted small">${new Date(h.at).toLocaleString('en-GB')}</span> ${esc(h.text)}</li>`).join('')}</ul>` : '<div class="empty"><p>Nothing yet.</p></div>'}</section>`;
     }
     // Two pickers: what you give (from your collection) and what you want (from theirs).
-    function tradeModal(pre) {
+    function tradeModal(pre, opts) {
+      opts = opts || {};
       if (!enabled()) { toast('Add a GitHub token in Settings first', true); return; }
       const s = S(), others = net.dir.filter((p) => !isMe(p) && p.full);
       if (!others.length) { toast('No other players are online yet', true); return; }
-      const st = { to: others.some((p) => p.id === pre) ? pre : others[0].id, give: {}, want: {} }, MAXN = 60;
-      const bg = ctx.modal(`<h2>New trade</h2><label class="f">Trade with<select id="trTo">${others.map((p) => `<option value="${p.id}" ${p.id === st.to ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
-        <div class="tr-cols"><div><h3>You give <span class="muted small" id="trGn"></span></h3><div id="trGive" class="tr-pick"></div></div>
+      const st = { to: others.some((p) => p.id === pre) ? pre : others[0].id, give: {}, want: {}, replace: opts.replace || null, focus: { give: null, want: null } }, MAXN = 60;
+      const bg = ctx.modal(`<h2>${opts.replace ? 'Counter-offer' : opts.gift ? '🎁 Send a gift' : 'New trade'}</h2>${opts.replace ? '<p class="muted small">Change the cards and send it back. Their original offer is declined when you send this one.</p>' : ''}<label class="f">Trade with<select id="trTo">${others.map((p) => `<option value="${p.id}" ${p.id === st.to ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+        <div id="trHint" class="tr-hint"></div><div class="tr-cols"><div><h3>You give <span class="muted small" id="trGn"></span></h3><div id="trGive" class="tr-pick"></div></div>
         <div><h3>You get <span class="muted small" id="trWn"></span></h3><p class="muted small">Pick nothing to send a gift.</p><div id="trWant" class="tr-pick"></div></div></div>
+        <div id="trVal" class="tr-val"></div>
         <label class="f" style="margin-top:12px">Message (optional)<textarea id="trMsg" maxlength="140" rows="2" placeholder="Say something with your offer..."></textarea></label>
         <div class="row wrap" style="margin-top:14px"><button class="btn primary" id="trSend" type="button">Send offer</button><button class="btn" data-act="close-modal" type="button">Cancel</button></div>`, 'wide');
-      // One entry per card, with a side tab listing its copy types so you can choose how many of each (normal or skibidi) to trade.
-      const entries = (cards) => Object.keys(cards).filter((id) => BYID[id] && cards[id].n > 0).sort((a, b) => BYID[a].rank - BYID[b].rank).map((id) => { const e = cards[id], v = []; if (e.n - e.h > 0) v.push({ h: 0, max: e.n - e.h }); if (e.h > 0) v.push({ h: 1, max: e.h }); return { id: id, v: v }; });
+      // Pick a card, and if you own several copies a tray shows every copy (normal and skibidi) to tick individually.
       const total = (m) => Object.keys(m).reduce((a, k) => a + (m[k] || 0), 0);
-      const fill = (el, list, sel, cnt) => {
-        el.innerHTML = list.length ? list.map((en) => { const picked = en.v.some((x) => sel[en.id + '|' + x.h]);
-          return `<div class="tr-item ${picked ? 'picked' : ''}"><button type="button" class="card-btn" data-add="${en.id}|${en.v[0].h}">${ctx.cardHTML(BYID[en.id], { holo: en.v.length === 1 && en.v[0].h === 1, size: 84 })}</button>
-          <div class="dupe-tab inline">${en.v.map((x) => { const k = en.id + '|' + x.h, n = sel[k] || 0; return `<div class="tr-var ${x.h ? 'holo' : ''}"><span>${x.h ? '✦ Skibidi' : 'Normal'} <small class="muted">own ${x.max}</small></span><span class="stepper"><button type="button" data-step="${k}|-1" aria-label="One fewer">−</button><b>${n}</b><button type="button" data-step="${k}|1" aria-label="One more">+</button><button type="button" class="all" data-step="${k}|all" title="All ${x.max}">All</button></span></div>`; }).join('')}</div></div>`; }).join('') : '<p class="muted small">Nothing to pick.</p>';
+      const ids = (cards) => Object.keys(cards).filter((id) => BYID[id] && cards[id].n > 0).sort((a, b) => BYID[a].rank - BYID[b].rank);
+      const picked = (sel, id) => (sel[id + '|0'] || 0) + (sel[id + '|1'] || 0);
+      const fill = (el, cards, sel, side, cnt) => {
+        const list = ids(cards), f = st.focus[side], fe = f && cards[f];
+        el.innerHTML = list.length ? `<div class="tr-grid">${list.map((id) => { const e = cards[id], p = picked(sel, id);
+          return `<button type="button" class="tr-pickcard ${p ? 'picked' : ''} ${f === id ? 'focus' : ''}" data-pick="${id}" aria-pressed="${!!p}">${ctx.cardHTML(BYID[id], { holo: e.n === e.h, size: 84 })}<span class="tr-n">${p ? p + '/' : ''}${e.n}</span></button>`; }).join('')}</div>
+          ${fe && fe.n > 1 ? `<div class="tr-tray"><div class="row between"><b>${esc(BYID[f].name)} <span class="muted small">tick the copies you want</span></b><span class="row"><button type="button" class="btn sm" data-all="${f}">All</button><button type="button" class="btn sm" data-none="${f}">None</button></span></div>${ctx.copyTray(f, fe, { sel: { 0: sel[f + '|0'] || 0, 1: sel[f + '|1'] || 0 }, size: 64 })}</div>` : ''}`
+          : '<p class="muted small">No cards.</p>';
         const t = total(sel); $(cnt, bg).textContent = t ? `(${t} card${t === 1 ? '' : 's'})` : '';
       };
-      const maxOf = (cards, k) => { const [id, h] = k.split('|'), e = cards[id]; return e ? (h === '1' ? e.h : e.n - e.h) : 0; };
+      const vals = (sel) => Object.keys(sel).reduce((a, k) => { const [id, h] = k.split('|'); return a + sel[k] * BYID[id].pts * (h === '1' ? G.GS.holoMult : 1); }, 0);
+      const lopsided = () => { const g = vals(st.give), w = vals(st.want); return g > 0 && w > 0 && Math.max(g, w) / Math.min(g, w) >= 2 && Math.abs(g - w) >= 50 ? { g: g, w: w } : null; };
+      const quick = (side, id) => { const cards = side === 'give' ? s.cards : ((net.dir.find((p) => p.id === st.to) || {}).cards || {}), x = cards[id]; if (!x) return; const h = x.n - x.h > 0 ? 0 : 1; st[side][id + '|' + h] = Math.max(st[side][id + '|' + h] || 0, 1); };
+      const hints = (them) => {
+        const theirs = (them.wish || []).filter((id) => s.cards[id] && s.cards[id].n > 0), mine = Object.keys(s.wish || {}).filter((id) => them.cards[id] && them.cards[id].n > 0);
+        const chip = (side, id) => `<button type="button" class="chip" data-quick="${side}|${id}">${esc(BYID[id].name)}</button>`;
+        return (mine.length ? `<p class="small"><b>${esc(them.name)} has ${mine.length} card${mine.length === 1 ? '' : 's'} on your wishlist:</b> ${mine.slice(0, 8).map((id) => chip('want', id)).join(' ')}</p>` : '') + (theirs.length ? `<p class="small"><b>You have ${theirs.length} card${theirs.length === 1 ? '' : 's'} on their wishlist:</b> ${theirs.slice(0, 8).map((id) => chip('give', id)).join(' ')}</p>` : '');
+      };
       const draw = () => { const them = net.dir.find((p) => p.id === st.to);
-        fill($('#trGive', bg), entries(s.cards), st.give, '#trGn'); fill($('#trWant', bg), them ? entries(them.cards) : [], st.want, '#trWn'); };
+        $('#trHint', bg).innerHTML = them ? hints(them) : '';
+        const g = vals(st.give), w = vals(st.want), lop = lopsided();
+        $('#trVal', bg).innerHTML = g || w ? `<span class="${lop ? 'warn' : ''}">You give <b>${ctx.fmt(g)}</b> pts · you get <b>${ctx.fmt(w)}</b> pts${lop ? ` · ⚠ ${lop.g > lop.w ? 'you are giving much more than you get' : 'you are asking for much more than you give'}` : ''}</span>` : '';
+        fill($('#trGive', bg), s.cards, st.give, 'give', '#trGn'); fill($('#trWant', bg), them ? them.cards : {}, st.want, 'want', '#trWn'); };
       draw();
-      $('#trTo', bg).onchange = (e) => { st.to = e.target.value; st.want = {}; draw(); };
-      const click = (key) => (e) => {
-        const cards = key === 'give' ? s.cards : (net.dir.find((p) => p.id === st.to) || { cards: {} }).cards, sel = st[key];
-        const add = e.target.closest('[data-add]'), stp = e.target.closest('[data-step]');
-        if (add) { const k = add.dataset.add; sel[k] = Math.min(maxOf(cards, k), (sel[k] || 0) + 1); }
-        else if (stp) { const parts = stp.dataset.step.split('|'), k = parts[0] + '|' + parts[1], d = parts[2], max = maxOf(cards, k); const cur = sel[k] || 0; sel[k] = d === 'all' ? max : Math.max(0, Math.min(max, cur + +d)); if (total(sel) > MAXN) sel[k] -= total(sel) - MAXN; if (!sel[k]) delete sel[k]; }
+      bg.addEventListener('click', (e) => { const q = e.target.closest('[data-quick]'); if (!q) return; const [side, id] = q.dataset.quick.split('|'); quick(side, id); st.focus[side] = null; draw(); });
+      // counter-offer / prefill: only copies that actually exist are kept
+      const pre2 = (items, sel, cards) => (items || []).forEach((it) => { const x = cards[it.id]; if (!x) return; const k = it.id + '|' + (it.h ? 1 : 0), have = it.h ? x.h : x.n - x.h; if ((sel[k] || 0) < have) sel[k] = (sel[k] || 0) + 1; });
+      pre2(opts.give, st.give, s.cards); pre2(opts.want, st.want, (net.dir.find((p) => p.id === st.to) || { cards: {} }).cards);
+      if (opts.msg) $('#trMsg', bg).value = opts.msg;
+      if (opts.gift) { $('#trWant', bg).parentNode.hidden = true; $('#trHint', bg).hidden = true; $('#trSend', bg).textContent = 'Send gift'; }
+      draw();
+      $('#trTo', bg).onchange = (e) => { st.to = e.target.value; st.want = {}; st.focus.want = null; draw(); };
+      const set = (sel, k, n, max) => { const others = total(sel) - (sel[k] || 0); n = Math.max(0, Math.min(max, n, MAXN - others)); if (n < 0) n = 0; if (n) sel[k] = n; else delete sel[k]; if (others + n >= MAXN) toast('You can trade up to ' + MAXN + ' cards at once'); };
+      const click = (side) => (e) => {
+        const cards = side === 'give' ? s.cards : (net.dir.find((p) => p.id === st.to) || { cards: {} }).cards, sel = st[side];
+        const pk = e.target.closest('[data-pick]'), cp = e.target.closest('[data-copy]'), al = e.target.closest('[data-all]'), no = e.target.closest('[data-none]');
+        if (pk) { const id = pk.dataset.pick, x = cards[id]; if (!x) return;
+          if (x.n === 1) { const k = id + '|' + (x.h ? 1 : 0); set(sel, k, sel[k] ? 0 : 1, 1); st.focus[side] = null; } else st.focus[side] = st.focus[side] === id ? null : id; }
+        else if (cp) { const [id, h, i] = cp.dataset.copy.split('|'), x = cards[id], k = id + '|' + h, cur = sel[k] || 0; set(sel, k, +i < cur ? +i : +i + 1, h === '1' ? x.h : x.n - x.h); }
+        else if (al) { const id = al.dataset.all, x = cards[id]; set(sel, id + '|0', x.n - x.h, x.n - x.h); set(sel, id + '|1', x.h, x.h); }
+        else if (no) { delete sel[no.dataset.none + '|0']; delete sel[no.dataset.none + '|1']; }
         else return;
-        if (add && total(sel) > MAXN) { sel[add.dataset.add]--; toast('You can trade up to ' + MAXN + ' cards at once', true); }
         draw();
       };
       $('#trGive', bg).onclick = click('give'); $('#trWant', bg).onclick = click('want');
       $('#trSend', bg).onclick = async () => {
         const conv = (m) => { const out = []; Object.keys(m).forEach((k) => { const [id, h] = k.split('|'); for (let i = 0; i < m[k]; i++) out.push({ id: id, h: +h }); }); return out; };
+        const lop = lopsided(); if (lop && !window.confirm(lop.g > lop.w ? `You are giving ${ctx.fmt(lop.g)} points of cards and getting ${ctx.fmt(lop.w)}. That is a lot more than you get back. Send anyway?` : `You are asking for ${ctx.fmt(lop.w)} points of cards and giving ${ctx.fmt(lop.g)}. They may say no. Send anyway?`)) return;
         const btn = $('#trSend', bg); btn.disabled = true;
-        try { await createTrade(st.to, conv(st.give), conv(st.want), $('#trMsg', bg).value); ctx.closeModal(bg); toast('Offer sent'); location.hash = '#trades'; if (location.hash === '#trades') drawTrades(); }
+        try { await createTrade(st.to, conv(st.give), conv(st.want), $('#trMsg', bg).value); if (st.replace) await decline(st.replace); ctx.closeModal(bg); toast('Offer sent'); location.hash = '#trades'; if (location.hash === '#trades') drawTrades(); }
         catch (e) { toast(e.message, true); btn.disabled = false; }
       };
+    }
+
+    // ---------- trade board ----------
+    // Public "looking for / offering" posts. One issue each (t:'board'), shown for 7 days, up to 3 per player.
+    const myPosts = () => net.board.filter((x) => x.pid === S().profile.id);
+    function postModal() {
+      if (!enabled()) { toast('The board needs the online connection', true); return; }
+      if (myPosts().length >= BOARD_MAX) { toast('You can have ' + BOARD_MAX + ' posts at once. Remove one first.', true); return; }
+      const s = S(), want = [], offer = [], q = { want: '' };
+      const bg = ctx.modal(`<h2>New board post</h2><p class="muted small">Up to 5 cards each. Posts last 7 days.</p>
+        <h3>Looking for</h3><div class="row wrap"><label class="f grow"><input id="bwQ" type="search" placeholder="Search a card" autocomplete="off"></label><button class="btn sm" id="bwWish" type="button">Use my wishlist</button></div><div id="bwList" class="ad-pick"></div><div id="bwCart" class="ad-pick"></div>
+        <h3>Offering</h3><div id="boList" class="ad-pick"></div><div id="boCart" class="ad-pick"></div>
+        <label class="f" style="margin-top:10px">Note (optional)<input id="bnNote" maxlength="100" placeholder="e.g. Open to anything rare" autocomplete="off"></label>
+        <div class="row wrap" style="margin-top:14px"><button class="btn primary" id="bnGo" type="button">Post</button><button class="btn" data-act="close-modal" type="button">Cancel</button></div>`, 'wide');
+      const owned = Object.keys(s.cards).filter((id) => BYID[id] && s.cards[id].n > 0).sort((a, b) => (s.cards[b].n > 1) - (s.cards[a].n > 1) || BYID[b].ti - BYID[a].ti);
+      const draw = () => {
+        const f = q.want.trim().toLowerCase();
+        $('#bwList', bg).innerHTML = (f ? CARDS.filter((c) => !c.off && c.name.toLowerCase().includes(f)).slice(0, 16) : []).map((c) => `<button type="button" class="btn sm" data-bw="${esc(c.id)}">＋ ${esc(c.name)}</button>`).join('');
+        $('#boList', bg).innerHTML = owned.slice(0, 40).map((id) => `<button type="button" class="btn sm" data-bo="${esc(id)}">＋ ${esc(BYID[id].name)}${s.cards[id].n > 1 ? ' ×' + s.cards[id].n : ''}</button>`).join('') || '<span class="muted small">You have no cards yet.</span>';
+        const cart = (l, k) => l.length ? l.map((id, i) => `<button type="button" class="btn sm primary" data-${k}x="${i}" title="Remove">${esc(BYID[id].name)} ✕</button>`).join('') : '<span class="muted small">None picked.</span>';
+        $('#bwCart', bg).innerHTML = cart(want, 'bw'); $('#boCart', bg).innerHTML = cart(offer, 'bo');
+      };
+      draw();
+      $('#bwQ', bg).oninput = (e) => { q.want = e.target.value; draw(); };
+      $('#bwWish', bg).onclick = () => { Object.keys(s.wish || {}).filter((id) => BYID[id] && want.indexOf(id) < 0).slice(0, 5 - want.length).forEach((id) => want.push(id)); draw(); };
+      bg.addEventListener('click', (e) => {
+        const a = e.target.closest('[data-bw],[data-bo],[data-bwx],[data-box]'); if (!a) return;
+        if (a.dataset.bw && want.length < 5 && want.indexOf(a.dataset.bw) < 0) want.push(a.dataset.bw); else if (a.dataset.bo && offer.length < 5 && offer.indexOf(a.dataset.bo) < 0) offer.push(a.dataset.bo);
+        else if (a.dataset.bwx != null) want.splice(+a.dataset.bwx, 1); else if (a.dataset.box != null) offer.splice(+a.dataset.box, 1);
+        draw();
+      });
+      $('#bnGo', bg).onclick = async () => {
+        if (!want.length && !offer.length) { toast('Pick at least one card', true); return; }
+        const btn = $('#bnGo', bg); btn.disabled = true;
+        try { const id = ctx.uid().replace(/[^a-z0-9]/g, '').slice(0, 16); await createIssue(`board:${id} ${s.profile.name}`.replace(/[\r\n]+/g, ' '), { t: 'board', v: 1, id: id, pid: s.profile.id, name: s.profile.name, want: want.slice(), offer: offer.slice(), note: $('#bnNote', bg).value, at: Date.now() });
+          ctx.closeModal(bg); toast('Posted'); await refresh().catch(() => {}); if (location.hash === '#board') pageBoard(); }
+        catch (e) { toast(e.message, true); btn.disabled = false; }
+      };
+    }
+    const ago = (t) => { const m = Math.max(1, Math.round((Date.now() - t) / 60000)); return m < 60 ? m + 'm ago' : m < 1440 ? Math.round(m / 60) + 'h ago' : Math.round(m / 1440) + 'd ago'; };
+    function pageBoard() {
+      const s = S(), list = net.board;
+      const thumbs = (ids) => `<div class="board-cards">${ids.map((id) => `<button type="button" class="card-btn" data-act="card" data-id="${id}">${ctx.cardHTML(BYID[id], { size: 76, ghost: !s.cards[id] })}</button>`).join('')}</div>`;
+      $('#main').innerHTML = `<div class="row wrap between"><h1>Trade board</h1><div class="row"><a class="btn" href="#trades">← Trades</a><button class="btn primary" id="bdPost" type="button" ${enabled() ? '' : 'disabled'}>＋ New post</button></div></div>
+        <p class="muted">Say what you are looking for and what you can offer. Anyone can answer a post with a trade offer. Posts last 7 days.</p><p class="muted" id="plstatus"></p>
+        ${list.length ? `<div class="board">${list.map((x) => { const me = x.pid === s.profile.id, them = net.dir.find((p) => p.id === x.pid);
+          return `<article class="panel board-post"><header><a class="pl-top" href="#user-${x.pid}">${them ? ctx.avatarHTML(34, them) : ''}<b>${esc(x.name)}</b></a><small class="muted">${ago(x.at)}</small></header>
+          ${x.want.length ? `<h3>Looking for</h3>${thumbs(x.want)}` : ''}${x.offer.length ? `<h3>Offering</h3>${thumbs(x.offer)}` : ''}${x.note ? `<p class="tr-msg">${esc(x.note)}</p>` : ''}
+          <div class="row wrap">${me ? `<button class="btn sm danger" data-bd-rm="${x.num}" type="button">Remove my post</button>` : `<button class="btn sm primary" data-bd-offer="${x.num}" type="button" ${them && them.full ? '' : 'disabled'}>Make an offer</button>`}</div></article>`; }).join('')}</div>` : '<div class="empty"><h2>Nothing posted yet</h2><p class="muted">Be the first. Post what you are hunting for.</p></div>'}`;
+      $$('.card', $('#main')).forEach(ctx.tilt); paint();
+      $('#bdPost').onclick = postModal;
+      $('#main').onclick = async (e) => {
+        const rm = e.target.closest('[data-bd-rm]'), of = e.target.closest('[data-bd-offer]');
+        if (rm) { try { await closeIssue(+rm.dataset.bdRm); await refresh(); pageBoard(); toast('Removed'); } catch (er) { toast(er.message, true); } }
+        else if (of) { const x = net.board.find((y) => y.num === +of.dataset.bdOffer), them = x && net.dir.find((p) => p.id === x.pid); if (!x || !them) return;
+          const give = x.want.filter((id) => s.cards[id] && s.cards[id].n > 0).map((id) => ({ id: id, h: s.cards[id].n - s.cards[id].h > 0 ? 0 : 1 })), want = x.offer.filter((id) => them.cards[id] && them.cards[id].n > 0).map((id) => ({ id: id, h: them.cards[id].n - them.cards[id].h > 0 ? 0 : 1 }));
+          tradeModal(x.pid, { give: give, want: want, msg: 'About your board post' }); }
+      };
+      if (Date.now() - net.last > 20000) cycle();
     }
 
     // ---------- settings panel ----------
@@ -496,7 +610,7 @@
       document.addEventListener('click', (e) => {
         const t = e.target.closest('[data-net]'); if (!t || t.disabled) return;
         const a = t.dataset.net, id = t.dataset.id;
-        if (a === 'trade') tradeModal(id); else if (a === 'accept') accept(id); else if (a === 'decline') decline(id); else if (a === 'cancel') cancel(id);
+        if (a === 'trade') tradeModal(id); else if (a === 'accept') accept(id); else if (a === 'decline') decline(id); else if (a === 'gift') tradeModal(id, { gift: true }); else if (a === 'counter') { const t = net.trades.find((x) => x.id === id); if (t) tradeModal(t.from.id, { give: t.want, want: t.give, replace: id }); } else if (a === 'cancel') cancel(id);
       });
       setInterval(() => { if (!document.hidden) cycle(); }, EVERY);
       document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - net.last > 15000) cycle(); });
@@ -505,6 +619,6 @@
     }
     // The Online panel in Settings is switched off. Return settingsHTML/bindSettings below to bring it back (share toggle, own token, restore from cloud).
     const SHOW_SETTINGS = false;
-    return { gh: gh, conf: conf, enabled: enabled, refresh: refresh, updateConfig: updateConfig, saveCardImage: saveCardImage, closeIssue: closeIssue, createIssue: createIssue, loadCache: loadCache, start: start, touch: touch, flush: flush, diag: diag, paint: paint, cycle: cycle, pagePlayers: pagePlayers, pageUser: pageUser, pageTrades: pageTrades, settingsHTML: () => (SHOW_SETTINGS ? settingsHTML() : ''), bindSettings: () => { if (SHOW_SETTINGS) bindSettings(); }, state: net, build: build };
+    return { rankOf: rankOf, logRedeem: logRedeem, weekStart: weekStart, log: (text) => updateConfig(() => {}, text), gh: gh, conf: conf, enabled: enabled, refresh: refresh, updateConfig: updateConfig, saveCardImage: saveCardImage, closeIssue: closeIssue, createIssue: createIssue, loadCache: loadCache, start: start, touch: touch, flush: flush, diag: diag, paint: paint, cycle: cycle, pageBoard: pageBoard, pagePlayers: pagePlayers, pageUser: pageUser, pageTrades: pageTrades, settingsHTML: () => (SHOW_SETTINGS ? settingsHTML() : ''), bindSettings: () => { if (SHOW_SETTINGS) bindSettings(); }, state: net, build: build };
   };
 })();

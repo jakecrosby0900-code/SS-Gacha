@@ -16,7 +16,7 @@
   window.SSGAdmin = function (ctx) {
     const G = ctx.G, $ = ctx.$, $$ = ctx.$$, esc = ctx.esc, net = ctx.net, toast = ctx.toast;
     const st = () => net.state;
-    const view = { q: '', cat: '', tier: '', only: '', mode: 'list', busy: false };
+    const view = { q: '', cat: '', tier: '', only: '', mode: 'list', busy: false, tab: 'home' };
     const unlocked = () => { try { return sessionStorage.getItem(FLAG) === '1'; } catch (e) { return false; } };
     const lock = () => { try { sessionStorage.removeItem(FLAG); } catch (e) { /* ignore */ } };
 
@@ -84,6 +84,7 @@
       if (!window.confirm(`Delete the account "${a.u}"? Their username becomes free and they disappear from the leaderboard. This cannot be undone.`)) return;
       await net.closeIssue(a.num);
       const p = st().dir.find((x) => x.id === a.pid); if (p) await net.closeIssue(p.num);
+      net.log('Deleted account ' + a.u).catch(() => {});
       await net.refresh(); toast('Account deleted'); page();
     });
 
@@ -119,6 +120,7 @@
         try {
           const gid = ctx.uid().replace(/[^a-z0-9]/g, '');
           await net.createIssue('grant:' + gid + ' ' + acc.k, { t: 'grant', v: 1, gid: gid, k: acc.k, cards: cards, packs: packs, at: Date.now() });
+          net.log('Gave ' + (acc.k === '*' ? 'everyone' : acc.u) + ': ' + (packs ? packs + ' pack' + (packs === 1 ? '' : 's') : '') + (packs && cards.length ? ' + ' : '') + (cards.length ? cards.reduce((a, c) => a + (c.n || 1), 0) + ' card(s)' : '')).catch(() => {});
           ctx.closeModal(bg); toast('Gift sent. ' + acc.u + ' gets it the next time they are online.');
         } catch (e) { $('#gvSend', bg).disabled = false; throw e; }
       });
@@ -133,6 +135,7 @@
         const v = Math.floor(+$('#stOpen', bg).value); if (!(v >= 0)) { toast('Enter a number', true); return; }
         const gid = ctx.uid().replace(/[^a-z0-9]/g, '');
         await net.createIssue('grant:' + gid + ' ' + acc.k, { t: 'grant', v: 1, gid: gid, k: acc.k, cards: [], packs: 0, opened: v, at: Date.now() });
+        net.log('Set packs opened for ' + acc.u + ' to ' + v).catch(() => {});
         ctx.closeModal(bg); toast('Done. It updates the next time ' + acc.u + ' is online.');
       });
     }
@@ -163,6 +166,7 @@
       const send = async (body, msg) => {
         const gid = ctx.uid().replace(/[^a-z0-9]/g, '');
         await net.createIssue('grant:' + gid + ' ' + acc.k, Object.assign({ t: 'grant', v: 1, gid: gid, k: acc.k, cards: [], packs: 0, at: Date.now() }, body));
+        net.log((body.wipe ? 'Removed ALL cards from ' : 'Took cards from ') + acc.u).catch(() => {});
         ctx.closeModal(bg); toast(msg);
       };
       $('#tkGo', bg).onclick = guard(async () => {
@@ -245,7 +249,7 @@
       const bg = ctx.modal(`<h2>Start a power hour ⚡</h2>
         <label class="f">Name<input id="phName" maxlength="40" placeholder="Power hour" autocomplete="off"></label>
         <div class="row wrap"><label class="f">Boost<select id="phKind"><option value="weight">How often cards drop</option><option value="holo">Skibidi chance</option></select></label>
-        <label class="f">Applies to<select id="phScope"><option value="all">Every card</option><option value="rare">Rare and above</option><option value="tier">One rarity</option><option value="set">One set</option><option value="card">One card</option></select></label></div>
+        <label class="f">Applies to<select id="phScope"><option value="rare" selected>Rare and above</option><option value="all">Every card</option><option value="tier">One rarity</option><option value="set">One set</option><option value="card">One card</option></select></label></div>
         <div id="phValBox"></div>
         <div class="row wrap"><label class="f">Times more likely<input id="phMult" type="number" min="0.1" max="1000" step="0.1" value="3"></label>
         <label class="f">Lasts (minutes)<input id="phDur" type="number" min="1" max="10080" value="60"></label>
@@ -255,15 +259,19 @@
         <div class="row wrap" style="margin-top:14px"><button class="btn primary" id="phGo" type="button">Start</button><button class="btn" data-act="close-modal" type="button">Cancel</button></div>`);
       const box = $('#phValBox', bg);
       const draw = () => {
-        const sc = $('#phScope', bg).value;
+        const kind = $('#phKind', bg).value, scopeSel = $('#phScope', bg), allOpt = scopeSel.querySelector('option[value="all"]');
+        // Boosting every card's drop weight by the same amount changes nothing (each card's share stays the same), so it is only offered for skibidi chance.
+        allOpt.disabled = kind === 'weight'; if (kind === 'weight' && scopeSel.value === 'all') scopeSel.value = 'rare';
+        const sc = scopeSel.value;
         box.innerHTML = sc === 'tier' ? `<label class="f">Rarity<select id="phVal">${opts(G.TIERS, G.TIERS[3])}</select></label>` : sc === 'set' ? `<label class="f">Set<select id="phVal">${opts(Object.keys(G.CATS), 'SS')}</select></label>`
           : sc === 'card' ? `<label class="f">Card<select id="phVal">${G.CARDS.slice().sort((a, b) => a.name.localeCompare(b.name)).map((c) => `<option value="${esc(c.id)}">${esc(c.name)} (${esc(c.cat)})</option>`).join('')}</select></label>` : '';
-        $('#phNote', bg).textContent = $('#phKind', bg).value === 'holo' ? 'Multiplies the chance that a pulled copy is a skibidi one (capped at 100%).' : 'Multiplies the drop weight of the matching cards, so they take a bigger share of every pack.';
+        $('#phNote', bg).textContent = $('#phKind', bg).value === 'holo' ? 'Multiplies the chance that a pulled copy is a skibidi one (capped at 100%).' : 'Makes the chosen cards take a bigger share of every pack, at the expense of the others. (It has to target some cards, because boosting every card equally changes nothing.)';
       };
       $('#phScope', bg).onchange = draw; $('#phKind', bg).onchange = draw; draw();
       bg.addEventListener('click', (e) => { const d = e.target.closest('[data-dur]'); if (d) $('#phDur', bg).value = d.dataset.dur; });
       $('#phGo', bg).onclick = guard(async () => {
         const scope = $('#phScope', bg).value, v = $('#phVal', bg), mult = +$('#phMult', bg).value, dur = Math.round(+$('#phDur', bg).value), inn = Math.max(0, Math.round(+$('#phIn', bg).value) || 0);
+        if ($('#phKind', bg).value === 'weight' && scope === 'all') { toast('Boosting every card equally changes nothing. Pick a rarity, set or card.', true); return; }
         if (!(mult > 0) || !(dur >= 1)) { toast('Enter a multiplier and how long it lasts', true); return; }
         const start = Date.now() + inn * 60000, ev = { id: ctx.uid().replace(/[^a-z0-9]/g, '').slice(0, 20), name: $('#phName', bg).value.trim() || 'Power hour', kind: $('#phKind', bg).value, scope: scope, value: v ? v.value : '', mult: mult, start: start, end: start + dur * 60000 };
         await net.updateConfig((cfg) => { cfg.events = cfg.events.filter((x) => x.end > Date.now() - 86400000); cfg.events.push(ev); });
@@ -398,6 +406,53 @@
       });
     }
 
+    // ---------- announcements ----------
+    function annModal() {
+      const bg = ctx.modal(`<h2>New announcement</h2><label class="f">Message<textarea id="anT" maxlength="240" rows="3" placeholder="e.g. Double power hour tonight at 8!"></textarea></label>
+        <div class="row wrap"><label class="f">Style<select id="anK"><option value="info">📣 News</option><option value="event">🎉 Event</option><option value="warn">⚠️ Warning</option></select></label>
+        <label class="f">Show for<select id="anD"><option value="1">1 hour</option><option value="6">6 hours</option><option value="24" selected>1 day</option><option value="72">3 days</option><option value="168">1 week</option><option value="0">Until I remove it</option></select></label></div>
+        <div class="row wrap" style="margin-top:12px"><button class="btn primary" id="anGo" type="button">Publish</button><button class="btn" data-act="close-modal" type="button">Cancel</button></div>`);
+      $('#anGo', bg).onclick = guard(async () => {
+        const text = $('#anT', bg).value.trim(); if (!text) { toast('Write a message', true); return; }
+        const h = +$('#anD', bg).value, kind = $('#anK', bg).value;
+        await net.updateConfig((c) => { c.announce = [{ id: ctx.uid().replace(/[^a-z0-9]/g, ''), text: text, kind: kind, until: h ? Date.now() + h * 3600000 : 0, at: Date.now() }].concat(c.announce).slice(0, 5); }, 'Posted announcement: ' + text.slice(0, 60));
+        ctx.closeModal(bg); toast('Published'); page();
+      });
+    }
+
+    // ---------- codes ----------
+    function codeModal(code) {
+      const cfg = st().cfg, old = code ? cfg.codes.find((c) => c.code === code) : null, cart = old ? old.cards.slice() : [];
+      let q = '';
+      const bg = ctx.modal(`<h2>${old ? 'Edit code' : 'New code'}</h2>
+        <label class="f">Code word<input id="cgCode" maxlength="24" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="e.g. WELCOME" value="${esc(old ? old.code : '')}" ${old ? 'readonly' : ''}></label>
+        <div class="row wrap"><label class="f">Free packs<input id="cgPacks" type="number" min="0" max="1000" value="${old ? old.packs : 3}"></label><label class="f grow">Note (only you see it)<input id="cgNote" maxlength="60" value="${esc(old ? old.note : '')}"></label></div>
+        <div class="row wrap"><label class="f">Max uses (0 = unlimited)<input id="cgMax" type="number" min="0" max="100000" value="${old ? old.max : 0}"></label>
+        <label class="f">Expires in (hours)<input id="cgExp" type="number" min="0" max="8760" step="1" placeholder="${old && old.until ? 'leave blank to keep' : 'never'}"></label></div>
+        <p class="muted small">${old && old.until ? (old.until > Date.now() ? 'Currently expires in ' + fmtLeft(old.until - Date.now()) + '. Type 0 to remove the expiry.' : 'This code has expired. Type a new number of hours to reopen it.') : 'Leave expiry blank for a code that never expires.'} Use limits count everyone who redeems it online.</p>
+        <label class="f">Also give cards (optional)<input id="cgQ" type="search" placeholder="Search a card to add" autocomplete="off"></label>
+        <div id="cgList" class="ad-pick"></div><h3 style="margin:10px 0 6px">Cards in this code</h3><div id="cgCart" class="ad-pick"></div>
+        <label class="check"><input id="cgOff" type="checkbox" ${old && old.off ? 'checked' : ''}> Switched off (players get "code does not exist")</label>
+        <div class="row wrap" style="margin-top:14px"><button class="btn primary" id="cgSave" type="button">Save</button>${old ? '<button class="btn danger" id="cgDel" type="button">Delete</button>' : ''}<button class="btn" data-act="close-modal" type="button">Cancel</button></div>`);
+      const draw = () => {
+        const f = q.trim().toLowerCase(), list = f ? G.CARDS.filter((c) => c.name.toLowerCase().includes(f)).slice(0, 20) : [];
+        $('#cgList', bg).innerHTML = list.map((c) => `<button type="button" class="btn sm" data-cg="${esc(c.id)}">＋ ${esc(c.name)}</button>`).join('');
+        $('#cgCart', bg).innerHTML = cart.length ? cart.map((id, i) => `<button type="button" class="btn sm" data-cx="${i}" title="Remove">${esc(G.BYID[id] ? G.BYID[id].name : id)} ✕</button>`).join('') : '<span class="muted small">No cards, packs only.</span>';
+      };
+      draw();
+      $('#cgQ', bg).oninput = (e) => { q = e.target.value; draw(); };
+      bg.addEventListener('click', (e) => { const a = e.target.closest('[data-cg]'), x = e.target.closest('[data-cx]'); if (a && cart.length < 20) { cart.push(a.dataset.cg); draw(); } else if (x) { cart.splice(+x.dataset.cx, 1); draw(); } });
+      $('#cgSave', bg).onclick = guard(async () => {
+        const word = $('#cgCode', bg).value.toUpperCase().replace(/[^A-Z0-9_-]/g, ''), packs = Math.min(1000, Math.max(0, Math.floor(+$('#cgPacks', bg).value) || 0));
+        if (word.length < 2) { toast('The code needs at least 2 letters or numbers', true); return; }
+        if (!packs && !cart.length) { toast('Give some packs or a card', true); return; }
+        if (!old && (cfg.codes.some((c) => c.code === word) || G.findCode(word))) { toast('That code already exists', true); return; }
+        await net.updateConfig((c) => { c.codes = (c.codes || []).filter((x) => x.code !== word); const hrs = $('#cgExp', bg).value.trim(), until = hrs === '' ? (old ? old.until : 0) : (+hrs > 0 ? Date.now() + Math.min(8760, +hrs) * 3600000 : 0); c.codes.push({ code: word, packs: packs, cards: cart.slice(), note: $('#cgNote', bg).value, off: $('#cgOff', bg).checked, max: Math.max(0, Math.floor(+$('#cgMax', bg).value) || 0), until: until }); });
+        ctx.closeModal(bg); toast('Code saved'); page();
+      });
+      if (old) $('#cgDel', bg).onclick = guard(async () => { if (!window.confirm('Delete code ' + old.code + '?')) return; await net.updateConfig((c) => { c.codes = c.codes.filter((x) => x.code !== old.code); }); ctx.closeModal(bg); toast('Code deleted'); page(); });
+    }
+
     // ---------- page ----------
     const secOpen = { overview: true, power: true, accounts: true, tiers: false, sets: false, scoring: false, cards: true };
     function visibleCards() {
@@ -419,7 +474,9 @@
           <td>${c.pts}${c.ptsOv != null ? '*' : ''}</td><td>${c.wm !== 1 ? c.wm : '1'}</td><td>${c.off ? '-' : pct(r.mine)}</td><td>${pct(c.holoOv != null ? c.holoOv : G.DIFFS.sigma.holo)}${c.holoOv != null ? '*' : ''}</td>
           <td><button class="btn sm" type="button" data-ad-card="${esc(c.id)}">Edit</button></td></tr>`; }).join('')}</tbody></table></div>`;
     }
-    const det = (key, title, body, extra) => `<details class="panel ad-sec" data-sec="${key}" ${secOpen[key] ? 'open' : ''}><summary><h2>${title}</h2>${extra || ''}</summary>${body}</details>`;
+    const TABS = [['home', 'Overview'], ['players', 'Players'], ['cards', 'Cards'], ['game', 'Rarities & sets'], ['codes', 'Codes & scoring'], ['activity', 'Activity']];
+    const TABOF = { overview: 'home', power: 'home', accounts: 'players', cards: 'cards', announce: 'home', activity: 'activity', tiers: 'game', sets: 'game', codes: 'codes', scoring: 'codes' };
+    const det = (key, title, body, extra) => (TABOF[key] !== view.tab ? '' : `<section class="panel ad-sec" data-sec="${key}"><header class="ad-head"><h2>${title}</h2>${extra || ''}</header><div class="ad-body">${body}</div></section>`);
     function page() {
       if (!unlocked()) { toast('Log in as admin in Settings first', true); location.hash = '#options'; return; }
       if (!net.enabled()) { $('#main').innerHTML = '<h1>Admin</h1><div class="panel"><p class="muted">The online connection is not set up, so there is nothing to manage.</p></div>'; return; }
@@ -431,23 +488,27 @@
         const p = byPid[a.pid], off = isBlocked(a.pid);
         const info = p ? `${ctx.fmt(p.score)} pts · ${p.unique} cards · ${p.opened} packs` : 'Nothing saved online yet';
         return `<div class="ad-row" data-u="${esc((a.u + ' ' + (p ? p.name : '')).toLowerCase())}">${p ? ctx.avatarHTML(34, p) : ''}<span class="ad-main"><b>${esc(a.u)}</b>${p && p.name !== a.u ? ` <small class="muted">(${esc(p.name)})</small>` : ''}<small class="muted">${info}${off ? ' · <b>removed from leaderboard</b>' : ''}</small></span>
-          <span class="ad-btns"><button class="btn sm" data-ad-give="${esc(a.k)}" type="button">Give</button><button class="btn sm" data-ad-take="${esc(a.k)}" type="button">Take</button><button class="btn sm" data-ad-stats="${esc(a.k)}" type="button">Packs opened</button>
-          ${off ? `<button class="btn sm" data-ad-restore="${esc(a.pid)}" type="button">Restore</button>` : `<button class="btn sm" data-ad-rm="${esc(a.pid)}" data-name="${esc(a.u)}" type="button">Remove</button>`}
-          <button class="btn sm danger" data-ad-acc="${esc(a.k)}" type="button">Delete</button></span></div>`;
+          <span class="ad-btns"><button class="btn sm primary" data-ad-give="${esc(a.k)}" type="button">Give</button>
+          <details class="ad-menu"><summary class="btn sm" aria-label="More actions">⋯</summary><div class="ad-pop"><button type="button" data-ad-take="${esc(a.k)}">Take cards…</button><button type="button" data-ad-stats="${esc(a.k)}">Edit packs opened…</button>
+          ${off ? `<button type="button" data-ad-restore="${esc(a.pid)}">Restore to leaderboard</button>` : `<button type="button" data-ad-rm="${esc(a.pid)}" data-name="${esc(a.u)}">Remove from leaderboard</button>`}
+          <button type="button" class="danger" data-ad-acc="${esc(a.k)}">Delete account</button></div></details></span></div>`;
       };
       const tierRows = G.TIERS.map((t) => { const c = cfg.tiers.find((x) => x.name === t), i = G.TIERS.indexOf(t), d = G.TIER_DEF[t], ed = d && cfg.tierEdits[t]; return `<div class="ad-row"><span class="ad-main"><b style="color:${esc(G.TIER_COLOR[t])}">${esc(t)}</b> <small class="muted">${G.POINTS[i]} pts · weight ${G.BASE_WEIGHTS[i]} · ${G.CARDS.filter((x) => x.tier === t).length} cards${c ? ' · custom' : ''}${ed ? ' · edited' : ''}</small></span><button class="btn sm" data-ad-tier="${esc(t)}" type="button">Edit</button></div>`; }).join('');
       const setRows = Object.keys(G.CATS).map((k) => { const c = cfg.sets.find((x) => x.name === k), ed = cfg.setEdits[k]; return `<div class="ad-row"><span class="ad-main"><b style="color:hsl(${G.CATS[k].hue},70%,62%)">${esc(k)}</b> <small class="muted">${G.CARDS.filter((x) => x.cat === k).length} cards${c ? ' · custom' : ''}${ed ? ' · edited' : ''}</small></span><button class="btn sm" data-ad-set="${esc(k)}" type="button">Edit</button></div>`; }).join('');
       const evs = cfg.events.slice().sort((a, b) => b.end - a.end), live = evs.filter((e) => e.start <= now && e.end > now), soon = evs.filter((e) => e.start > now), past = evs.filter((e) => e.end <= now);
-      const evRow = (e, tag) => `<div class="ad-row ${tag === 'past' ? 'dim' : ''}"><span class="ad-main"><b>${esc(e.name)}</b> <small class="muted">${esc(evText(e))}</small><small class="muted">${tag === 'live' ? '⚡ running · ' + fmtLeft(e.end - now) + ' left' : tag === 'soon' ? 'starts in ' + fmtLeft(e.start - now) + ' · lasts ' + fmtLeft(e.end - e.start) : 'ended'}</small></span><button class="btn sm ${tag === 'live' ? 'danger' : ''}" data-ad-evx="${esc(e.id)}" type="button">${tag === 'live' ? 'End now' : tag === 'soon' ? 'Cancel' : 'Remove'}</button></div>`;
+      const evRow = (e, tag) => `<div class="ad-row ${tag === 'past' ? 'dim' : ''}"><span class="ad-main"><b>${esc(e.name)}</b> <small class="muted">${esc(evText(e))}${e.kind === 'weight' && e.scope === 'all' ? ' · <b>no effect: every card is boosted equally</b>' : ''}</small><small class="muted">${tag === 'live' ? '⚡ running · ' + fmtLeft(e.end - now) + ' left' : tag === 'soon' ? 'starts in ' + fmtLeft(e.start - now) + ' · lasts ' + fmtLeft(e.end - e.start) : 'ended'}</small></span><button class="btn sm ${tag === 'live' ? 'danger' : ''}" data-ad-evx="${esc(e.id)}" type="button">${tag === 'live' ? 'End now' : tag === 'soon' ? 'Cancel' : 'Remove'}</button></div>`;
       const totalPacks = dir.reduce((a, p) => a + (p.opened || 0), 0), totalCards = dir.reduce((a, p) => a + Object.keys(p.cards).reduce((x, k) => x + p.cards[k].n, 0), 0), top = dir.slice().sort((a, b) => b.score - a.score)[0];
       const hasUndo = (() => { try { return !!localStorage.getItem('ss-gacha-cfg-undo'); } catch (e) { return false; } })();
-      $('#main').innerHTML = `<div class="row wrap between"><h1>Admin</h1><div class="row"><button class="btn" id="adSync" type="button">↻ Refresh</button><button class="btn" id="adOut" type="button">Log out of admin</button></div></div>
+      $('#main').innerHTML = `<div class="row wrap between ad-top"><h1>Admin</h1><div class="row"><button class="btn sm" id="adSync" type="button">↻ Refresh</button><button class="btn sm" id="adOut" type="button">Log out</button></div></div>
+        <nav class="ad-tabs" aria-label="Admin sections">${TABS.map(([k, l]) => `<button type="button" data-ad-tab="${k}" ${view.tab === k ? 'aria-current="page"' : ''}>${l}</button>`).join('')}</nav>
         ${det('overview', 'Overview', `<div class="facts ad-facts"><div><b>${accounts.length}</b><span>accounts</span></div><div><b>${dir.length}</b><span>players with a save</span></div><div><b>${ctx.fmt(totalPacks)}</b><span>packs opened</span></div><div><b>${ctx.fmt(totalCards)}</b><span>cards held</span></div><div><b>${top ? esc(top.name) : '-'}</b><span>top score ${top ? ctx.fmt(top.score) : ''}</span></div></div>
           <div class="row wrap" style="margin-top:12px"><button class="btn" id="adUndo" type="button" ${hasUndo ? '' : 'disabled'} title="Puts the game settings back how they were before your last change">↶ Undo last change</button><button class="btn" id="adExport" type="button">⬇ Back up settings</button><label class="btn" style="cursor:pointer">⬆ Restore backup<input id="adImport" type="file" accept="application/json,.json" hidden></label></div>
           <p class="muted small">A backup holds every card edit, custom card, rarity, set and power hour (not pictures or accounts).</p>`)}
         ${det('power', 'Power hours ⚡', `<p class="muted small">Make some cards more likely for a while. Everyone playing sees a banner while one is running.</p>
           ${live.concat(soon).length ? `<div class="ad-list">${live.map((e) => evRow(e, 'live')).join('')}${soon.map((e) => evRow(e, 'soon')).join('')}</div>` : '<p class="muted small">Nothing running.</p>'}
           ${past.length ? `<details class="ad-past"><summary class="muted small">Ended (${past.length})</summary><div class="ad-list">${past.map((e) => evRow(e, 'past')).join('')}</div></details>` : ''}`, '<button class="btn primary sm" id="adPower" type="button">＋ Start power hour</button>')}
+        ${det('announce', 'Announcements 📣', `<p class="muted small">A banner at the top of every page for everyone. Players can dismiss it.</p>${cfg.announce.length ? `<div class="ad-list">${cfg.announce.map((a) => `<div class="ad-row"><span class="ad-main"><b>${esc(a.text)}</b><small class="muted">${a.kind}${a.until ? ' · ' + (a.until > now ? fmtLeft(a.until - now) + ' left' : 'ended') : ' · until you remove it'}</small></span><button class="btn sm danger" data-ad-annx="${esc(a.id)}" type="button">Remove</button></div>`).join('')}</div>` : '<p class="muted small">No announcements.</p>'}`, '<button class="btn primary sm" id="adAnn" type="button">＋ New announcement</button>')}
+        ${det('activity', 'Activity log', `<p class="muted small">Admin changes, gifts and code redemptions, newest first (the last ~100 admin actions are kept).</p><label class="f"><input id="adLogQ" type="search" placeholder="Filter the log" autocomplete="off"></label><div class="ad-list" id="adLog">${(() => { const rows = cfg.log.map((l) => ({ at: l.at, text: l.text, who: 'Admin' })).concat(st().redeems.map((r) => ({ at: r.at, text: r.name + ' redeemed ' + r.code, who: 'Player' }))).sort((a, b) => b.at - a.at).slice(0, 200); return rows.length ? rows.map((r) => `<div class="ad-row" data-t="${esc(r.text.toLowerCase())}"><span class="ad-main">${esc(r.text)}<small class="muted">${r.who} · ${r.at ? new Date(r.at).toLocaleString('en-GB') : ''}</small></span></div>`).join('') : '<div class="empty"><p>Nothing yet.</p></div>'; })()}</div>`)}
         ${det('accounts', `Accounts <span class="muted small">${accounts.length}</span>`, `<p class="muted small">Every account is its own leaderboard entry.</p>
           <div class="row wrap"><label class="f grow"><input id="adAcctQ" type="search" placeholder="Find an account" autocomplete="off"></label><button class="btn" id="adGiveAll" type="button">🎁 Give to everyone</button></div>
           ${accounts.length ? `<div class="ad-list" id="adAcctList">${accounts.map(row).join('')}</div>` : '<div class="empty"><p>No accounts yet.</p></div>'}
@@ -455,6 +516,8 @@
           ${orphans.length ? `<h3 style="margin:16px 0 8px">Old players with no account <span class="muted small">${orphans.length}</span></h3><p class="muted small">Hidden from the leaderboard until their owner creates an account on that device.</p><div class="ad-list">${orphans.map((p) => `<div class="ad-row">${ctx.avatarHTML(34, p)}<span class="ad-main"><b>${esc(p.name)}</b><small class="muted">${ctx.fmt(p.score)} pts · ${p.unique} cards</small></span>${isBlocked(p.id) ? '' : `<button class="btn sm danger" data-ad-rm="${esc(p.id)}" data-name="${esc(p.name)}" type="button">Remove</button>`}</div>`).join('')}</div>` : ''}`)}
         ${det('tiers', `Rarities <span class="muted small">${G.TIERS.length}</span>`, `<p class="muted small">Edit any rarity: colour, points and how often it drops. Built-in ones can be reset.</p><div class="ad-list">${tierRows}</div>`, '<button class="btn primary sm" id="adAddTier" type="button">＋ Add rarity</button>')}
         ${det('sets', `Sets <span class="muted small">${Object.keys(G.CATS).length}</span>`, `<div class="ad-list">${setRows}</div>`, '<button class="btn primary sm" id="adAddSet" type="button">＋ Add set</button>')}
+        ${det('codes', `Pack codes <span class="muted small">${cfg.codes.length}</span>`, `<p class="muted small">Players type these in the 🎁 Code box. Each works once per save. Codes written in the game files still work too.</p>
+          ${cfg.codes.length ? `<div class="ad-list">${cfg.codes.map((c) => `<div class="ad-row ${c.off ? 'dim' : ''}"><span class="ad-main"><b class="mono">${esc(c.code)}</b>${c.off ? ' <small class="ad-tag inl">off</small>' : ''}<small class="muted">${c.packs ? c.packs + ' pack' + (c.packs === 1 ? '' : 's') : ''}${c.packs && c.cards.length ? ' + ' : ''}${c.cards.length ? c.cards.map((id) => esc(G.BYID[id] ? G.BYID[id].name : id)).join(', ') : ''}${c.note ? ' · ' + esc(c.note) : ''}</small><small class="muted">used ${net.state.redeems.filter((r) => r.code === c.code).length}${c.max ? ' / ' + c.max : ''}${c.until ? (c.until > now ? ' · expires in ' + fmtLeft(c.until - now) : ' · <b>expired</b>') : ''}</small></span><button class="btn sm" data-ad-code="${esc(c.code)}" type="button">Edit</button></div>`).join('')}</div>` : '<div class="empty"><p>No codes yet.</p></div>'}`, '<button class="btn primary sm" id="adAddCode" type="button">＋ New code</button>')}
         ${det('scoring', 'Scoring', `<p class="muted small">Every copy of a card counts towards a player's score. A skibidi copy is worth this many times a normal copy.</p><div class="row wrap"><label class="f">Skibidi points multiplier<input id="adHoloMult" type="number" min="1" max="20" step="0.25" value="${G.GS.holoMult}"></label><button class="btn primary" id="adSaveScoring" type="button">Save</button></div>`)}
         ${det('cards', `Cards <span class="muted small">${G.CARDS.length}</span>`, `<div class="filters"><label class="f">Search<input id="adQ" type="search" value="${esc(view.q)}" placeholder="Card name" autocomplete="off"></label>
           <label class="f">Set<select id="adCat"><option value="">All sets</option>${Object.keys(G.CATS).map((k) => `<option value="${esc(k)}" ${view.cat === k ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select></label>
@@ -463,9 +526,10 @@
           <label class="f">View<select id="adMode"><option value="list" ${view.mode === 'list' ? 'selected' : ''}>List (edit inline)</option><option value="grid" ${view.mode === 'grid' ? 'selected' : ''}>Pictures</option></select></label></div>
           <div class="ad-bulk" id="adBulk"></div>
           <div id="adCards">${cardsHTML()}</div>`, '<button class="btn primary sm" id="adAdd" type="button">＋ Add card</button>')}`;
+      const $q = (x) => $(x) || document.createElement('div');
       const bulkBar = () => {
         const n = sel.size, vis = visibleCards();
-        $('#adBulk').innerHTML = `<span class="muted small">${n} selected</span> <button class="btn sm" type="button" id="adSelAll">Select all ${vis.length} shown</button>${n ? `<button class="btn sm" type="button" id="adSelNone">Clear</button>
+        $q('#adBulk').innerHTML = `<span class="muted small">${n} selected</span> <button class="btn sm" type="button" id="adSelAll">Select all ${vis.length} shown</button>${n ? `<button class="btn sm" type="button" id="adSelNone">Clear</button>
           <select id="adBulkTier" aria-label="Rarity"><option value="">Set rarity…</option>${opts(G.TIERS, '')}</select><select id="adBulkCat" aria-label="Set"><option value="">Move to set…</option>${opts(Object.keys(G.CATS), '')}</select>
           <label class="f inline">Weight ×<input id="adBulkW" type="number" min="0" max="1000" step="0.1" placeholder="1" style="width:70px"></label><button class="btn sm" type="button" id="adBulkWgo">Apply</button>
           <button class="btn sm" type="button" id="adBulkOff">Stop dropping</button><button class="btn sm" type="button" id="adBulkOn">Resume dropping</button><button class="btn sm danger" type="button" id="adBulkReset">Reset edits</button>` : ''}`;
@@ -476,43 +540,49 @@
           g('#adBulkOff').onclick = () => bulk('off', true); g('#adBulkOn').onclick = () => bulk('off', false);
           g('#adBulkReset').onclick = () => { if (window.confirm('Reset ' + sel.size + ' card(s) to their original name, set, rarity and stats?')) bulk('reset'); }; }
       };
-      const redraw = () => { $('#adCards').innerHTML = cardsHTML(); $$('#adCards .card').forEach(ctx.tilt); bulkBar(); };
+      const redraw = () => { $q('#adCards').innerHTML = cardsHTML(); $$q('#adCards .card').forEach(ctx.tilt); bulkBar(); };
       bulkBar();
-      $('#adOut').onclick = () => { lock(); location.hash = '#options'; };
-      $('#adSync').onclick = guard(async () => { await net.refresh(); toast('Refreshed'); page(); });
-      $('#adAdd').onclick = (e) => { e.preventDefault(); cardEditor(null); };
-      $('#adAddTier').onclick = (e) => { e.preventDefault(); tierEditor(null); }; $('#adAddSet').onclick = (e) => { e.preventDefault(); setEditor(null); };
-      $('#adPower').onclick = (e) => { e.preventDefault(); powerModal(); };
-      $('#adGiveAll').onclick = () => giveModal({ u: 'everyone', k: '*' });
-      const ra = $('#adRestoreAll'); if (ra) ra.onclick = () => restoreAll();
-      $('#adAcctQ').oninput = (e) => { const q = e.target.value.trim().toLowerCase(); $$('#adAcctList .ad-row').forEach((r) => { r.hidden = !!q && r.dataset.u.indexOf(q) < 0; }); };
-      $('#adQ').oninput = (e) => { view.q = e.target.value; redraw(); };
-      $('#adCat').onchange = (e) => { view.cat = e.target.value; redraw(); }; $('#adTier').onchange = (e) => { view.tier = e.target.value; redraw(); };
-      $('#adOnly').onchange = (e) => { view.only = e.target.value; redraw(); }; $('#adMode').onchange = (e) => { view.mode = e.target.value; redraw(); };
-      $('#adSaveScoring').onclick = guard(async () => { const v = Math.min(20, Math.max(1, +$('#adHoloMult').value || 2)); await net.updateConfig((c) => { c.settings.holoMult = v; }); toast('Saved. Every score updates straight away.'); page(); });
-      $('#adUndo').onclick = guard(async () => {
+      $q('#adOut').onclick = () => { lock(); location.hash = '#options'; };
+      $q('#adSync').onclick = guard(async () => { await net.refresh(); toast('Refreshed'); page(); });
+      $q('#adAdd').onclick = (e) => { e.preventDefault(); cardEditor(null); };
+      $q('#adAddTier').onclick = (e) => { e.preventDefault(); tierEditor(null); }; $q('#adAddSet').onclick = (e) => { e.preventDefault(); setEditor(null); };
+      $q('#adPower').onclick = (e) => { e.preventDefault(); powerModal(); };
+      $q('#adAnn').onclick = (e) => { e.preventDefault(); annModal(); };
+      $q('#adLogQ').oninput = (e) => { const q = e.target.value.trim().toLowerCase(); $$('#adLog .ad-row').forEach((r) => { r.hidden = !!q && r.dataset.t.indexOf(q) < 0; }); };
+      $q('#adAddCode').onclick = (e) => { e.preventDefault(); codeModal(null); };
+      $q('#adGiveAll').onclick = () => giveModal({ u: 'everyone', k: '*' });
+      const ra = $q('#adRestoreAll'); if (ra) ra.onclick = () => restoreAll();
+      $q('#adAcctQ').oninput = (e) => { const q = e.target.value.trim().toLowerCase(); $$q('#adAcctList .ad-row').forEach((r) => { r.hidden = !!q && r.dataset.u.indexOf(q) < 0; }); };
+      $q('#adQ').oninput = (e) => { view.q = e.target.value; redraw(); };
+      $q('#adCat').onchange = (e) => { view.cat = e.target.value; redraw(); }; $q('#adTier').onchange = (e) => { view.tier = e.target.value; redraw(); };
+      $q('#adOnly').onchange = (e) => { view.only = e.target.value; redraw(); }; $q('#adMode').onchange = (e) => { view.mode = e.target.value; redraw(); };
+      $q('#adSaveScoring').onclick = guard(async () => { const v = Math.min(20, Math.max(1, +$q('#adHoloMult').value || 2)); await net.updateConfig((c) => { c.settings.holoMult = v; }); toast('Saved. Every score updates straight away.'); page(); });
+      $q('#adUndo').onclick = guard(async () => {
         let prev = null; try { prev = JSON.parse(localStorage.getItem('ss-gacha-cfg-undo') || 'null'); } catch (e) { prev = null; } if (!prev) return;
         if (!window.confirm('Put the game settings back to how they were before your last change?')) return;
         await net.updateConfig((c) => { Object.keys(c).forEach((k) => { delete c[k]; }); Object.assign(c, prev); }); toast('Undone'); page();
       });
-      $('#adExport').onclick = () => {
+      $q('#adExport').onclick = () => {
         const blob = new Blob([JSON.stringify(Object.assign({ t: 'config', v: 1 }, st().cfg), null, 1)], { type: 'application/json' }), a = document.createElement('a');
         a.href = URL.createObjectURL(blob); a.download = 'ss-gacha-settings-' + new Date().toISOString().slice(0, 10) + '.json'; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
       };
-      $('#adImport').onchange = guard(async (e) => {
+      $q('#adImport').onchange = guard(async (e) => {
         const f = e.target.files[0]; e.target.value = ''; if (!f) return;
         let j; try { j = JSON.parse(await f.text()); } catch (er) { throw new Error('That is not a valid backup file'); }
         if (!j || typeof j !== 'object') throw new Error('That is not a valid backup file');
         if (!window.confirm('Replace ALL current card edits, custom cards, rarities, sets and power hours with this backup? (Use "Undo last change" to go back.)')) return;
         await net.updateConfig((c) => { const keep = c.blocked; Object.keys(c).forEach((k) => { delete c[k]; }); Object.assign(c, j); c.blocked = keep; }); toast('Backup restored'); page();
       });
-      $$('details.ad-sec').forEach((d) => d.addEventListener('toggle', () => { secOpen[d.dataset.sec] = d.open; }));
       $('#main').onchange = (e) => {
         const tk = e.target.closest('[data-ad-tick]'); if (tk) { if (tk.checked) sel.add(tk.dataset.adTick); else sel.delete(tk.dataset.adTick); const cell = tk.closest('.ad-cell'); if (cell) cell.classList.toggle('ticked', tk.checked); bulkBar(); return; }
         const inl = e.target.closest('[data-inl]'); if (inl) { const [id, what] = inl.dataset.inl.split('|'), keep = new Set(sel); sel.clear(); sel.add(id); Promise.resolve(bulk(what, inl.value)).then(() => { keep.forEach((x) => sel.add(x)); }); }
       };
       $('#main').onclick = (e) => {
-        const t = e.target.closest('[data-ad-card],[data-ad-rm],[data-ad-restore],[data-ad-acc],[data-ad-give],[data-ad-take],[data-ad-stats],[data-ad-tier],[data-ad-set],[data-ad-evx]'); if (!t) return;
+        const t = e.target.closest('[data-ad-card],[data-ad-rm],[data-ad-restore],[data-ad-acc],[data-ad-give],[data-ad-take],[data-ad-stats],[data-ad-tier],[data-ad-set],[data-ad-evx],[data-ad-tab],[data-ad-code],[data-ad-annx]'); if (!t) return;
+        if (t.dataset.adAnnx) { const id = t.dataset.adAnnx; guard(async () => { await net.updateConfig((c) => { c.announce = c.announce.filter((x) => x.id !== id); }, 'Removed an announcement'); toast('Removed'); page(); })(); return; }
+        if (t.dataset.adTab) { view.tab = t.dataset.adTab; page(); return; }
+        if (t.dataset.adCode) { codeModal(t.dataset.adCode); return; }
+        { const m = t.closest('details.ad-menu'); if (m) m.open = false; }
         if (t.dataset.adCard) cardEditor(t.dataset.adCard);
         else if (t.dataset.adRm) removePlayer(t.dataset.adRm, t.dataset.name || 'Player');
         else if (t.dataset.adRestore) restorePlayer(t.dataset.adRestore);

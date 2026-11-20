@@ -35,6 +35,8 @@ Settings > Admin: log in with the admin username and password, then open the Adm
 - add custom rarities (name, colour, points, drop weight, where it sits in the order) and custom sets,
 - add new cards and edit **any** card (built-in or custom): name, set, rarity, points, drop-weight multiplier or an exact chance per slot, skibidi chance, on/off, picture; tick several cards to change rarity/set/weight/on-off in bulk, or edit rarity/set inline in the list,
 - edit every rarity and set (colour, points, drop weight, set colour/blurb), with Reset for built-in ones,
+- post announcements (a dismissible banner for everyone), see an activity log of admin actions and code redemptions,
+- create pack codes (packs and/or cards, optional max uses and expiry) in the Codes tab,
 - start **power hours** (more-likely cards or higher skibidi chance for a set time; players see a banner), set the skibidi points multiplier, give a gift to everyone, back up / restore settings, and undo the last change.
 
 Scoring: every copy counts, a skibidi copy is worth the multiplier (default 2x). Monster cards use their rarity's normal drop weight while the monster is enabled.

@@ -19,7 +19,7 @@
   const KEY = 'ss-gacha-save-v1';
   let memorySave = null; // used if localStorage is blocked
   function fresh() {
-    return { v: 1, mod: 0, syncMod: 0, granted: {}, started: false, diff: 'sigma', packs: DIFFS.sigma.start, last: Date.now(), sinceRare: 0, cards: {},
+    return { v: 1, mod: 0, syncMod: 0, granted: {}, started: false, diff: 'sigma', packs: DIFFS.sigma.start, last: Date.now(), sinceRare: 0, cards: {}, wish: {}, wk: null, showcase: [],
       stats: { opened: 0, pulls: 0 }, settings: { sound: true, volume: 0.6, motion: true, monster: false, share: true },
       // The "fake account": lives in the save file. id is random and only there so a leaderboard can tell players apart later.
       profile: { id: uid(), name: 'Player', pfp: null, banner: null, hue: 28, joined: Date.now() }, codes: [], account: null,
@@ -38,6 +38,9 @@
       hue: Number.isFinite(+jp.hue) ? ((+jp.hue % 360) + 360) % 360 : 28, joined: +jp.joined || (times.length ? Math.min.apply(null, times) : Date.now()) };
     s.granted = isObj(j.granted) ? j.granted : {};
     s.mod = +j.mod || 0; s.syncMod = +j.syncMod || 0; s.settings.share = true; // sharing is always on now: the account save depends on it
+    s.wish = {}; if (isObj(j.wish)) Object.keys(j.wish).slice(0, 400).forEach((id) => { if (j.wish[id]) s.wish[id] = 1; });
+    s.showcase = Array.isArray(j.showcase) ? j.showcase.filter((x) => typeof x === 'string' && /\|[01]$/.test(x)).slice(0, 5) : [];
+    s.wk = isObj(j.wk) && +j.wk.t > 0 ? { t: +j.wk.t, s: Math.max(0, +j.wk.s || 0) } : null;
     s.codes = Array.isArray(j.codes) ? j.codes.map(String) : [];
     s.account = typeof j.account === 'string' && j.account ? j.account.slice(0, 20) : null;
     const jn = (j && j.net) || {};
@@ -187,14 +190,15 @@
   function closeModal(bg) { (bg || $$('.modal-bg').pop())?.remove(); if (!$('.modal-bg')) document.documentElement.classList.remove('modal-open'); }
 
   // ---------- header ----------
-  const NAV = [['home', 'Packs'], ['collection', 'Collection'], ['index', 'Index'], ['leaderboard', 'Leaderboard'], ['trades', 'Trades'], ['profile', 'Profile'], ['options', 'Settings']];
+  const NAV = [['home', 'Packs', '🎴', 1], ['collection', 'Collection', '🗂️', 1], ['index', 'Index', '📖', 0], ['leaderboard', 'Leaderboard', '🏆', 1], ['trades', 'Trades', '⇄', 1], ['board', 'Board', '📋', 0], ['profile', 'Profile', '👤', 0], ['options', 'Settings', '⚙️', 0]]; // [page, label, icon, shown in the phone's bottom bar]
   let net = null, auth = null, admin = null; // the online layer (js/net.js), accounts (js/auth.js) and admin (js/admin.js), created at the bottom
   const BOLT = '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M13.5 2 4 13.5h6.2L8.5 22 20 9.8h-6.6z" fill="currentColor"/></svg>';
+  const navLink = ([h, l, ic], cur) => `<a href="#${h}" style="order:${NAV.findIndex((n) => n[0] === h)}" ${cur === h ? 'aria-current="page"' : ''}><span class="ni" aria-hidden="true">${ic}</span><span class="nl">${l}</span>${h === 'trades' ? '<span class="nbadge" data-tradebadge hidden></span>' : ''}</a>`;
   function renderHeader() {
     if (!auth || !auth.loggedIn()) { $('#header').innerHTML = `<a class="logo" href="#home">${BOLT}<span>Special Strike <b>Gacha</b></span></a>`; return; }
     const cur0 = (location.hash.slice(1) || 'home').split('-')[0], cur = cur0 === 'user' ? 'leaderboard' : cur0 === 'players' ? 'leaderboard' : cur0;
     $('#header').innerHTML = `<a class="logo" href="#home">${BOLT}<span>Special Strike <b>Gacha</b></span></a>
-      <nav class="main" aria-label="Main">${NAV.map(([h, l]) => `<a href="#${h}" ${cur === h ? 'aria-current="page"' : ''}>${l}${h === 'trades' ? '<span class="nbadge" data-tradebadge hidden></span>' : ''}</a>`).join('')}</nav>
+      <nav class="main" aria-label="Main">${NAV.filter((n) => n[3]).map((n) => navLink(n, cur)).join('')}<button type="button" class="nav-more${NAV.some(([h, , , pri]) => !pri && h === cur) ? ' on' : ''}" data-act="nav-more" aria-expanded="false" style="order:${NAV.length}"><span class="ni" aria-hidden="true">⋯</span><span class="nl">More</span></button><div class="more-sheet">${NAV.filter((n) => !n[3]).map((n) => navLink(n, cur)).join('')}</div></nav>
       <div class="top-right"><button class="btn sm" data-act="redeem" title="Enter a pack code">🎁 Code</button><a class="chip" href="#home" title="Packs ready"><span class="pk"></span><b data-hud="packs">${S.packs}</b></a>
         <a class="me" href="#profile" title="${esc(S.profile.name)}">${avatarHTML(32)}<i class="netdot" data-netdot></i></a>
         <button class="icon-btn" data-act="toggle-sound" aria-label="Sound ${S.settings.sound ? 'on' : 'off'}" title="Sound">${S.settings.sound ? '🔊' : '🔇'}</button></div>`;
@@ -203,6 +207,7 @@
   function updateHud() {
     tick();
     $$('[data-hud="packs"]').forEach((e) => (e.textContent = S.packs));
+    const stk = $('[data-stack]'); if (stk && +stk.dataset.n !== stackN()) { stk.dataset.n = stackN(); stk.innerHTML = stackHTML(); }
     const ck = $('[data-clock]'); if (ck) ck.textContent = new Date().toLocaleTimeString('en-GB');
     const d = D(), ring = $('[data-ring]');
     if (ring) {
@@ -261,6 +266,37 @@
     };
   }
   // Used for your own profile and for other players' profiles. ov overrides the computed numbers (for players we only have a summary of).
+  const badgesHTML = (cards, opened, rank) => { const b = G.badgesOf(cards, opened, rank || 0); return b.length ? `<div class="badges" aria-label="Badges">${b.map((x) => `<span class="badge" title="${esc(x.tip)}"><i>${x.ic}</i>${esc(x.name)}</span>`).join('')}</div>` : ''; };
+  function annHTML() {
+    let hid = []; try { hid = JSON.parse(localStorage.getItem('ss-gacha-ann') || '[]'); } catch (e) { hid = []; }
+    const now = Date.now(), list = (net.state.cfg.announce || []).filter((a) => (!a.until || a.until > now) && hid.indexOf(a.id + ':' + a.at) < 0);
+    return list.map((a) => `<div class="ann ann-${a.kind}" role="status"><span class="ann-ic">${a.kind === 'warn' ? '⚠️' : a.kind === 'event' ? '🎉' : '📣'}</span><span class="ann-t">${esc(a.text)}</span><button type="button" class="ann-x" data-act="ann-x" data-id="${esc(a.id + ':' + a.at)}" aria-label="Dismiss">✕</button></div>`).join('');
+  }
+  // The player's top 5: their own picks (entries are "id|0" normal or "id|1" skibidi), or automatically their five most valuable cards.
+  function showcaseList(cards, show) {
+    const own = (id, h) => BYID[id] && cards[id] && (h ? cards[id].h > 0 : cards[id].n - cards[id].h > 0);
+    let list = (show || []).map((x) => x.split('|')).filter(([id, h]) => own(id, +h)).map(([id, h]) => [id, +h]).slice(0, 5);
+    if (!list.length) list = Object.keys(cards).filter((id) => BYID[id] && cards[id].n > 0).map((id) => [id, cards[id].h > 0 ? 1 : 0])
+      .sort((a, b) => BYID[b[0]].pts * (b[1] ? G.GS.holoMult : 1) - BYID[a[0]].pts * (a[1] ? G.GS.holoMult : 1) || BYID[b[0]].ti - BYID[a[0]].ti || BYID[a[0]].rank - BYID[b[0]].rank).slice(0, 5);
+    return list;
+  }
+  const showcaseHTML = (cards, show, mine) => { const l = showcaseList(cards, show); return l.length ? `<section><div class="row wrap between"><h2>Showcase</h2>${mine ? '<button class="btn sm" type="button" data-act="showcase">✎ Choose cards</button>' : ''}</div><div class="showcase">${l.map(([id, h]) => `<button class="card-btn" data-act="card" data-id="${id}" data-var="${h}">${cardHTML(BYID[id], { holo: !!h, size: 150 })}</button>`).join('')}</div></section>` : ''; };
+  function showcaseModal() {
+    const opts = []; Object.keys(S.cards).filter((id) => BYID[id] && S.cards[id].n > 0).sort((a, b) => BYID[b].ti - BYID[a].ti || BYID[a].rank - BYID[b].rank).forEach((id) => { const e = S.cards[id]; if (e.n - e.h > 0) opts.push(id + '|0'); if (e.h > 0) opts.push(id + '|1'); });
+    const pick = showcaseList(S.cards, S.showcase).map(([id, h]) => id + '|' + h); let q = '';
+    const bg = modal(`<h2>Your showcase</h2><p class="muted small">Pick up to 5 cards to show at the top of your profile. Leave it empty and your 5 most valuable cards are shown.</p>
+      <label class="f">Search<input id="scQ" type="search" placeholder="Card name" autocomplete="off"></label><div class="sc-grid" id="scGrid"></div>
+      <div class="row wrap" style="margin-top:14px"><button class="btn primary" id="scSave" type="button">Save (<span id="scN"></span>/5)</button><button class="btn" id="scAuto" type="button">Use my top 5</button><button class="btn" data-act="close-modal" type="button">Cancel</button></div>`, 'wide');
+    const draw = () => { const f = q.trim().toLowerCase();
+      $('#scGrid', bg).innerHTML = opts.filter((k) => !f || BYID[k.split('|')[0]].name.toLowerCase().includes(f)).map((k) => { const [id, h] = k.split('|'), on = pick.indexOf(k) >= 0;
+        return `<button type="button" class="tr-pickcard ${on ? 'picked' : ''}" data-sc="${k}" aria-pressed="${on}">${cardHTML(BYID[id], { holo: h === '1', size: 84 })}${on ? `<span class="tr-n">${pick.indexOf(k) + 1}</span>` : ''}</button>`; }).join('') || '<p class="muted small">No cards.</p>';
+      $('#scN', bg).textContent = pick.length; };
+    draw();
+    $('#scQ', bg).oninput = (e) => { q = e.target.value; draw(); };
+    $('#scGrid', bg).onclick = (e) => { const b = e.target.closest('[data-sc]'); if (!b) return; const k = b.dataset.sc, i = pick.indexOf(k); if (i >= 0) pick.splice(i, 1); else if (pick.length < 5) pick.push(k); else toast('Up to 5 cards. Tap one to remove it first.', true); draw(); };
+    $('#scSave', bg).onclick = () => { S.showcase = pick.slice(); save(); closeModal(bg); toast('Showcase saved'); route(); };
+    $('#scAuto', bg).onclick = () => { S.showcase = []; save(); closeModal(bg); toast('Showing your top 5'); route(); };
+  }
   function profileHTML(p, cards, stats, actions, full, ov) {
     ov = ov || {};
     const ents = Object.entries(cards).filter(([id, e]) => BYID[id] && e.n > 0);
@@ -273,27 +309,33 @@
     const rare = ov.rarest !== undefined ? ov.rarest : (top ? BYID[top[0]].name : null);
     const facts = [[fmt(sc), 'collection score'], [`${uniq}/${CARDS.length}`, 'unique cards'], [stats.opened || 0, 'packs opened'], [sk, 'skibidi cards'], [rare ? esc(rare) : 'None yet', 'rarest card']];
     const sections = ov.lite ? `<p class="muted">Only a summary is available right now. Connect GitHub in Settings to see their cards.</p>`
-      : `<section><h2>Recent cards</h2>${grid(recent, 'No cards yet.')}</section><section><h2>Favorite cards</h2>${grid(favs, 'No favorites yet.')}</section>${full ? `<section><h2>Collection <span class="muted small">${ents.length} cards</span></h2>${grid(ents.slice().sort(byRar), 'Nothing yet.')}</section>` : ''}`;
+      : `${showcaseHTML(cards, ov.show, ov.mine)}<section><h2>Recent cards</h2>${grid(recent, 'No cards yet.')}</section><section><h2>Favorite cards</h2>${grid(favs, 'No favorites yet.')}</section>${full ? `<section><h2>Collection <span class="muted small">${ents.length} cards</span></h2>${grid(ents.slice().sort(byRar), 'Nothing yet.')}</section>` : ''}`;
     return `<section class="panel profile"><div class="pf-banner" style="${bannerCSS(p)}"></div>
         <div class="pf-head">${avatarHTML(104, p)}<div class="pf-id"><h1>${esc(p.name)}${ov.online ? ' <span class="online-dot" title="Online now"></span>' : ''}</h1><p class="muted small">Playing since ${new Date(p.joined).toLocaleDateString('en-GB')}${ov.acct ? ' · @' + esc(ov.acct) : ''}</p></div><div class="row wrap pf-actions">${actions || ''}</div></div>
-        <div class="facts pf-facts">${facts.map(([v, l]) => `<div><b>${v}</b><span>${l}</span></div>`).join('')}</div></section>${sections}`;
+        ${ov.lite ? '' : badgesHTML(cards, stats.opened || 0, ov.rank)}<div class="facts pf-facts">${facts.map(([v, l]) => `<div><b>${v}</b><span>${l}</span></div>`).join('')}</div></section>${sections}`;
   }
   function pageProfile() {
-    main().innerHTML = profileHTML(S.profile, S.cards, S.stats, '<button class="btn" data-act="edit-profile">✎ Edit profile</button>', false, { acct: S.account });
+    main().innerHTML = profileHTML(S.profile, S.cards, S.stats, '<button class="btn" data-act="edit-profile">✎ Edit profile</button>', false, { mine: true, show: S.showcase, acct: S.account, rank: net.state.loaded ? net.rankOf(S.profile) : 0 });
     $$('.card', main()).forEach(tilt);
   }
 
   // ---------- pack codes ----------
-  const CODEMAP = {}; Object.keys(G.CODES).forEach((k) => (CODEMAP[k.toUpperCase()] = G.CODES[k]));
-  function redeem(raw) {
-    const k = String(raw).trim().toUpperCase(), c = CODEMAP[k];
+  async function redeem(raw) {
+    const k = String(raw).trim().toUpperCase(), c = G.findCode(k);
     if (!k) return false;
     if (!c) { toast('That code does not exist', true); return false; }
     if (S.codes.includes(k)) { toast('You already used that code', true); return false; }
+    if (c.until && Date.now() > c.until) { toast('That code has expired', true); return false; }
+    if (c.managed && c.max && net.enabled()) {
+      try { await net.refresh(); } catch (e) { toast('Could not check that code right now. Try again in a moment.', true); return false; }
+      if (net.state.redeems.filter((r) => r.code === k).length >= c.max) { toast('That code has run out', true); return false; }
+    }
+    if (S.codes.includes(k)) return false;
     S.codes.push(k); const now = Date.now(), got = [];
     if (c.packs) S.packs += c.packs;
     (c.cards || []).forEach((id) => { if (!BYID[id]) return; const e = S.cards[id]; if (!e) S.cards[id] = { n: 1, h: 0, t: now, l: now, f: 0 }; else { e.n++; e.l = now; } got.push(BYID[id].name); });
     save(); renderHeader(); if (!opening) route();
+    if (net.enabled()) net.logRedeem(k);
     toast(`Code accepted${c.packs ? `: +${c.packs} pack${c.packs === 1 ? '' : 's'}` : ''}${got.length ? ` and ${got.join(', ')}` : ''}`);
     return true;
   }
@@ -301,7 +343,7 @@
     const bg = modal(`<h2>Enter a code</h2><p class="muted small">Pack codes give you free packs. Each code works once per save.</p>
       <label class="f">Code<input id="codeIn" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="e.g. WELCOME"></label>
       <div class="row wrap" style="margin-top:12px"><button class="btn primary" id="codeGo" type="button">Redeem</button></div>`);
-    const go = () => { if (redeem($('#codeIn', bg).value)) closeModal(bg); };
+    const go = async () => { if (await redeem($('#codeIn', bg).value)) closeModal(bg); };
     $('#codeGo', bg).onclick = go; $('#codeIn', bg).onkeydown = (e) => { if (e.key === 'Enter') go(); }; $('#codeIn', bg).focus();
   }
 
@@ -312,6 +354,9 @@
   const main = () => $('#main');
   let homeTab = 'recent';
   const HOME_TABS = [['recent', 'Recent'], ['rarest', 'Rarest'], ['fav', 'Favorites'], ['holo', 'Skibidi'], ['stats', 'Stats']];
+  // The pile on the home page shows one pack per pack you have, up to 5 (an empty pile shows one faded pack).
+  const stackN = () => Math.min(5, Math.max(1, S.packs));
+  const stackHTML = () => { const n = stackN(); return Array.from({ length: n }, (_, k) => { const i = n - 1 - k, mid = (n - 1) / 2; return `<span class="fan" style="--i:${i};--o:${(k - mid).toFixed(2)};z-index:${k}">${packBag()}</span>`; }).join(''); };
   const leftTxt = (ms) => { const m = Math.max(1, Math.ceil(ms / 60000)); return m >= 60 ? Math.floor(m / 60) + 'h ' + (m % 60) + 'm' : m + ' min'; };
   function powerBanner() {
     const evs = G.eventsNow(Date.now()); if (!evs.length) return '';
@@ -348,13 +393,13 @@
         <div class="hero-text"><p class="eyebrow">Special Strike</p><h1>Pull cards from the Special Strike roster.</h1>
           <p class="muted">${CARDS.length} cards across ${Object.keys(CATS).length} sets. A free pack of ${CARDS_PER_PACK} cards every ${d.interval} minutes, up to ${d.cap} stored.</p>
           <div class="pack-count" data-packcount aria-live="polite"></div></div>
-        <div class="hero-pack"><button class="pack" data-act="open-1" data-needpack aria-label="Open a pack"><span class="fan" style="--i:2">${packBag()}</span><span class="fan" style="--i:1">${packBag()}</span>${packBag()}</button>
+        <div class="hero-pack"><button class="pack" data-act="open-1" data-needpack aria-label="Open a pack"><span class="stack" data-stack data-n="${stackN()}">${stackHTML()}</span></button>
           <div class="row"><button class="btn primary" data-act="open-1" data-needpack>Open pack</button><button class="btn" data-act="open-all" data-needall hidden>Open all</button></div></div>
         <div class="hero-side"><div class="ring-wrap" role="timer" aria-label="Time until the next free pack"><svg class="ring" viewBox="0 0 120 120" aria-hidden="true"><circle class="ring-bg" cx="60" cy="60" r="52"/><circle class="ring-fg" data-ring cx="60" cy="60" r="52" transform="rotate(-90 60 60)"/></svg><div class="ring-text"><b data-ringtime>--:--</b><span data-ringlabel>next pack</span></div></div>
           <div class="stat"><b>${have}</b><span>of ${CARDS.length} cards</span></div><div class="bar"><i style="width:${pct}%"></i></div>
           <div class="stat"><b>${S.stats.opened}</b><span>packs opened</span></div><div class="stat"><b>${fmt(score())}</b><span>points</span></div></div>
       </section>
-      ${powerBanner()}
+      ${powerBanner()}${Object.keys(S.cards).length || S.stats.opened ? '' : '<div class="welcome"><b>New here?</b> Tap <i>Open pack</i>, then drag across the top of the pack to rip it open. Every card you pull counts towards your score.</div>'}
       <section><h2>Your cards</h2><div id="hometabs">${homeTabsHTML()}</div></section>
       <section class="rarest"><h2>Rarest cards in the game <span class="muted small">${rareHave}/${topRare.length} found</span></h2><p class="muted small">The hardest pulls available. Grey means you still need it.</p><div class="card-grid small rare-grid">${topRare.map((c) => { const x = S.cards[c.id]; return `<button class="card-btn" data-act="card" data-id="${c.id}">${cardHTML(c, { ghost: !x, holo: x && x.h > 0, count: x && x.n })}</button>`; }).join('')}</div></section>`;
     $$('.card', main()).forEach(tilt); updateHud();
@@ -367,25 +412,32 @@
     const chips = [[0, x.n - x.h, 'Normal'], [1, x.h, '✦ Skibidi']].filter((c) => c[1] > 0);
     return `<div class="dupe-tab" role="group" aria-label="Your copies">${chips.map(([k, n, l]) => `<button type="button" class="dupe-chip ${v === k ? 'on' : ''} ${k ? 'holo' : ''}" data-dupe="${id}|${k}" aria-pressed="${v === k}">${l} <b>×${n}</b></button>`).join('')}</div>`;
   }
+  // Every copy you own of one card as small cards (normal ones first, then skibidi). sel: {0: n, 1: n} highlights the first n of each kind, or pick: [h, i] highlights one.
+  function copyTray(id, x, o) {
+    o = o || {}; const c = BYID[id], nn = x.n - x.h, CAP = 60, out = [];
+    [[0, nn], [1, x.h]].forEach(([h, n]) => { for (let i = 0; i < Math.min(n, CAP); i++) {
+      const on = o.pick ? o.pick[0] === h && o.pick[1] === i : (o.sel && i < (o.sel[h] || 0));
+      out.push(`<button type="button" class="copy-tile ${h ? 'holo' : ''} ${on ? 'on' : ''}" data-copy="${id}|${h}|${i}" aria-pressed="${!!on}" aria-label="${h ? 'Skibidi' : 'Normal'} copy ${i + 1} of ${n}">${cardHTML(c, { holo: !!h, size: o.size || 76 })}<span class="copy-lab">${h ? '✦ ' : ''}${i + 1}</span></button>`); } });
+    return `<div class="copy-tray" role="group" aria-label="Your copies">${out.join('')}</div>`;
+  }
   function pageCollection() {
     main().innerHTML = `<h1>Collection</h1><p class="muted">${owned().length} of ${CARDS.length} cards found. Tap a card for details.</p>
       <div class="filters panel">
         <label class="f">Search<input id="colq" type="search" value="${esc(colState.q)}" placeholder="Card name" autocomplete="off"></label>
         <label class="f">Set<select id="colcat"><option value="all">All sets</option>${Object.keys(CATS).map((k) => `<option ${colState.cat === k ? 'selected' : ''}>${k}</option>`).join('')}</select></label>
         <label class="f">Rarity<select id="coltier"><option value="all">All rarities</option>${TIERS.map((t) => `<option ${colState.tier === t ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
-        <label class="f">Show<select id="colshow">${[['owned', 'Owned'], ['missing', 'Missing'], ['all', 'Everything'], ['holo', 'Skibidi only'], ['spare', 'Spares'], ['fav', 'Favorites']].map(([v, l]) => `<option value="${v}" ${colState.show === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label class="f">Show<select id="colshow">${[['owned', 'Owned'], ['missing', 'Missing'], ['all', 'Everything'], ['holo', 'Skibidi only'], ['spare', 'Spares'], ['fav', 'Favorites'], ['wish', 'Wishlist']].map(([v, l]) => `<option value="${v}" ${colState.show === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
         <label class="f">Sort<select id="colsort">${[['rank', 'Rank (rarest first)'], ['recent', 'Newest'], ['name', 'Name'], ['copies', 'Copies']].map(([v, l]) => `<option value="${v}" ${colState.sort === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       </div><div id="colgrid"></div>`;
     const draw = () => {
       let list = CARDS.filter((c) => (colState.cat === 'all' || c.cat === colState.cat) && (colState.tier === 'all' || c.tier === colState.tier) && (!colState.q || c.name.toLowerCase().includes(colState.q.toLowerCase())));
       const e = (c) => S.cards[c.id];
-      list = list.filter((c) => { const x = e(c); switch (colState.show) { case 'owned': return !!x; case 'missing': return !x; case 'holo': return x && x.h > 0; case 'spare': return x && x.n > 1; case 'fav': return x && x.f; default: return true; } });
+      list = list.filter((c) => { const x = e(c); switch (colState.show) { case 'owned': return !!x; case 'missing': return !x; case 'holo': return x && x.h > 0; case 'spare': return x && x.n > 1; case 'fav': return x && x.f; case 'wish': return !!S.wish[c.id]; default: return true; } });
       const by = { rank: (a, b) => a.rank - b.rank, name: (a, b) => a.name.localeCompare(b.name), recent: (a, b) => (e(b)?.t || 0) - (e(a)?.t || 0), copies: (a, b) => (e(b)?.n || 0) - (e(a)?.n || 0) || a.rank - b.rank };
       list.sort((a, b) => ((e(b) && e(b).f) ? 1 : 0) - ((e(a) && e(a).f) ? 1 : 0) || by[colState.sort](a, b)); // favorites always come first
-      $('#colgrid').innerHTML = list.length ? `<div class="card-grid">${list.map((c) => { const x = e(c); const v = x ? (colVar[c.id] != null && (colVar[c.id] ? x.h > 0 : x.n - x.h > 0) ? colVar[c.id] : (x.h > 0 ? 1 : 0)) : 0; return `<div class="col-item ${x && x.n > 1 ? 'has-dupes' : ''}"><button class="card-btn" data-act="card" data-id="${c.id}" data-var="${v}" ${x ? '' : 'aria-label="Not found yet"'}>${cardHTML(c, { locked: !x, holo: x && v === 1, count: x && x.n, fav: x && x.f })}</button>${x && x.n > 1 ? dupeTab(c.id, x, v) : ''}</div>`; }).join('')}</div>` : '<div class="empty"><h2>Nothing here</h2><p class="muted">No cards match these filters.</p></div>';
+      $('#colgrid').innerHTML = list.length ? `<div class="card-grid">${list.map((c) => { const x = e(c); const v = x ? (colVar[c.id] != null && (colVar[c.id] ? x.h > 0 : x.n - x.h > 0) ? colVar[c.id] : (x.h > 0 ? 1 : 0)) : 0; return `<div class="col-item ${x && x.n > 1 ? 'has-dupes' : ''} ${S.wish[c.id] ? 'wished' : ''}"><button class="card-btn" data-act="card" data-id="${c.id}" data-var="${v}" ${x ? '' : 'aria-label="Not found yet"'}>${cardHTML(c, { locked: !x, holo: x && v === 1, count: x && x.n, fav: x && x.f })}</button></div>`; }).join('')}</div>` : '<div class="empty"><h2>Nothing here</h2><p class="muted">No cards match these filters.</p></div>';
       $$('#colgrid .card').forEach(tilt);
     };
-    $('#colgrid').addEventListener('click', (ev) => { const b = ev.target.closest('[data-dupe]'); if (!b) return; const [id, k] = b.dataset.dupe.split('|'); colVar[id] = +k; draw(); });
     $('#colq').oninput = (ev) => { colState.q = ev.target.value; draw(); };
     $('#colcat').onchange = (ev) => { colState.cat = ev.target.value; draw(); };
     $('#coltier').onchange = (ev) => { colState.tier = ev.target.value; draw(); };
@@ -464,20 +516,20 @@
   function applyAudio() { configureAudio({ sound: S.settings.sound, volume: S.settings.volume }); }
 
   // ---------- card detail ----------
-  function cardModal(id, variant) {
+  function cardModal(id, variant, idx) {
     const c = BYID[id], e = S.cards[id];
-    const v = e ? (variant != null && (variant ? e.h > 0 : e.n - e.h > 0) ? +variant : (e.h > 0 ? 1 : 0)) : 0;
-    const tabs = e && e.n > 1 ? `<div class="dupe-tab inline" role="group" aria-label="Your copies">${[[0, e.n - e.h, 'Normal'], [1, e.h, '✦ Skibidi']].filter((x) => x[1] > 0).map(([k, n, l]) => `<button type="button" class="dupe-chip ${v === k ? 'on' : ''} ${k ? 'holo' : ''}" data-dvar="${k}">${l} <b>×${n}</b></button>`).join('')}</div>` : '';
+    const v = e ? (variant != null && (variant ? e.h > 0 : e.n - e.h > 0) ? +variant : (e.h > 0 ? 1 : 0)) : 0, i = Math.max(0, Math.min((v ? e && e.h : e && e.n - e.h) - 1 || 0, idx | 0));
     const worth = c.pts * (v ? G.GS.holoMult : 1);
+    const tray = e && e.n > 1 ? `<h3 class="tray-h">All ${e.n} copies <span class="muted small">tap one to look at it</span></h3>${copyTray(id, e, { pick: [v, i] })}` : '';
     const bg = modal(`<div class="detail">${cardHTML(c, { locked: !e, holo: e && v === 1, count: e && e.n, fav: e && e.f, size: 250 })}
       <div class="detail-info"><p class="eyebrow">${c.cat} · Rank #${c.rank}</p><h2>${e ? esc(c.name) : 'Not found yet'}</h2>
         <p class="tier-line ${tcls(c.tier)}"><span class="tier-text">${c.tier}</span> <span class="muted small">· ${worth} point${worth === 1 ? '' : 's'}${v ? ' (skibidi copy)' : ''}</span></p>
-        ${e ? `<p class="muted small">You own ${e.n} cop${e.n === 1 ? 'y' : 'ies'}${e.h ? `, ${e.h} skibidi` : ''}.</p>${tabs}
+        ${e ? `<p class="muted small">You own ${e.n} cop${e.n === 1 ? 'y' : 'ies'}${e.h ? `, ${e.h} skibidi` : ''}.</p>
         <div class="row wrap"><button class="btn" data-act="fav" data-id="${id}">${e.f ? '★ Unfavorite' : '☆ Favorite'}</button></div>`
-        : `<p class="muted">${c.monster ? `${c.tier} card. Something hungry guards this one.` : `${c.tier} card from the ${c.cat} set. Keep opening packs.`}</p>`}
-      </div></div>`, 'wide');
+        : `<div class="row wrap"><button class="btn ${S.wish[id] ? 'primary' : ''}" data-act="wish" data-id="${id}">${S.wish[id] ? '🔖 On your wishlist' : '🔖 Add to wishlist'}</button></div><p class="muted">${c.monster ? `${c.tier} card. Something hungry guards this one.` : `${c.tier} card from the ${c.cat} set. Keep opening packs.`}</p>`}
+      </div></div>${tray}`, 'wide');
     $$('.card', bg).forEach(tilt);
-    $$('[data-dvar]', bg).forEach((b) => b.addEventListener('click', () => { closeModal(bg); cardModal(id, +b.dataset.dvar); }));
+    $$('[data-copy]', bg).forEach((b) => b.addEventListener('click', () => { const [, h, k] = b.dataset.copy.split('|'); closeModal(bg); cardModal(id, +h, +k); }));
   }
 
   // ---------- pack opening ----------
@@ -505,24 +557,39 @@
     if (S.packs < D().cap) S.last = Math.max(S.last, Date.now() - (Date.now() - S.last)); save();
     const eatenAll = results.flat().filter((o) => o.eaten); let all = results.flat().filter((o) => !o.eaten); const single = n === 1;
     const ov = document.createElement('div'); ov.className = 'opening'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', 'Opening ' + (single ? 'a pack' : n + ' packs'));
-    ov.innerHTML = `<canvas aria-hidden="true"></canvas><div class="flash"></div><button class="btn skip">Skip</button><p class="sr-only" aria-live="assertive" id="announce"></p><div class="stage-pack"><div class="pack">${packBag(n)}</div></div><p class="tap-hint">Tap the pack</p>`;
+    ov.innerHTML = `<canvas aria-hidden="true"></canvas><div class="flash"></div><button class="btn skip">Skip</button><p class="sr-only" aria-live="assertive" id="announce"></p><div class="stage-pack"><div class="pack">${packBag(n)}</div></div><p class="tap-hint">Drag across the top of the pack to rip it open</p>`;
     document.body.append(ov); document.documentElement.classList.add('modal-open', 'pack-open');
     const fx = particles($('canvas', ov)); let skipped = false;
     const wait = (ms) => sleep(skipped || reduceMotion() ? Math.min(ms, 25) : ms), say = (t) => ($('#announce', ov).textContent = t);
-    $('.skip', ov).onclick = () => { skipped = true; }; $('.skip', ov).focus();
+    let ripGo = null; $('.skip', ov).onclick = () => { skipped = true; if (ripGo) ripGo(); }; $('.skip', ov).focus();
     const stage = $('.stage-pack', ov);
-    // Tapping the pack does nothing to the result, it only feels like you're ripping it open.
+    // Rip it open: press near the top of the pack and drag across. (Enter / Space or Skip also tear it, for keyboards.)
     const tapColors = ['#b794ff', '#4ade80', '#fff', '#8b5cf6'];
-    stage.addEventListener('pointerdown', (ev) => {
-      if (!stage.isConnected || stage.classList.contains('torn')) return;
-      const pk = $('.pack', stage); pk.classList.remove('tap'); void pk.offsetWidth; pk.classList.add('tap');
-      SFX.click(); SFX.flip(); fx.burst(tapColors, 14, false, ev.clientX, ev.clientY);
-      const rp = document.createElement('span'); rp.className = 'ripple'; rp.style.left = ev.clientX + 'px'; rp.style.top = ev.clientY + 'px'; ov.append(rp); setTimeout(() => rp.remove(), 600);
+    const pack0 = $('.pack', stage); stage.style.touchAction = 'none'; stage.tabIndex = 0; stage.setAttribute('aria-label', 'Pack. Drag across the top to rip it open, or press Enter.');
+    const ripped = new Promise((resolve) => {
+      let drag = null, lastTick = 0, done = false;
+      const set = (v) => { stage.style.setProperty('--rip', v.toFixed(3)); };
+      const finishRip = () => { if (done) return; done = true; drag = null; set(1); resolve(); };
+      ripGo = finishRip;
+      stage.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); finishRip(); } });
+      stage.addEventListener('pointerdown', (ev) => {
+        if (done) return;
+        const r = pack0.getBoundingClientRect(), nearTop = ev.clientY < r.top + r.height * 0.38 && ev.clientY > r.top - 40 && ev.clientX > r.left - 30 && ev.clientX < r.right + 30;
+        if (nearTop) { drag = { x: ev.clientX, id: ev.pointerId, w: r.width }; try { stage.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ } stage.classList.add('ripping'); }
+        else { pack0.classList.remove('tap'); void pack0.offsetWidth; pack0.classList.add('tap'); SFX.click(); fx.burst(tapColors, 10, false, ev.clientX, ev.clientY); const hint = $('.tap-hint', ov); if (hint) hint.classList.add('nudge'); }
+      });
+      stage.addEventListener('pointermove', (ev) => {
+        if (!drag || done) return;
+        const v = Math.min(1, Math.abs(ev.clientX - drag.x) / (drag.w * 0.75)); set(v);
+        if (v - lastTick > 0.12) { lastTick = v; SFX.shake(1); }
+        if (v >= 1) finishRip();
+      });
+      const up = () => { if (!drag || done) return; drag = null; lastTick = 0; stage.classList.remove('ripping'); set(0); };
+      stage.addEventListener('pointerup', up); stage.addEventListener('pointercancel', up);
     });
     const finish = () => { fx.stop(); ov.remove(); opening = false; document.documentElement.classList.remove('pack-open'); document.documentElement.classList.toggle('modal-open', !!$('.modal-bg')); renderHeader(); route(); };
     try {
-      for (const lvl of [1, 2, 3]) { if (skipped) break; ov.classList.remove('shake1', 'shake2', 'shake3'); ov.classList.add('shake' + lvl); for (let i = 0; i < 4 && !skipped; i++) { SFX.shake(lvl); await wait(190 - lvl * 30); } }
-      ov.classList.remove('shake1', 'shake2', 'shake3');
+      await ripped; $('.tap-hint', ov)?.remove();
       if (!skipped) { SFX.tear(); stage.classList.add('torn'); $('.flash', ov).classList.add('go'); fx.burst(['#b794ff', '#4ade80', '#fff', '#8b5cf6'], 90); await wait(950); }
       stage.remove(); $('.tap-hint', ov)?.remove();
       const sorted = all.slice().sort((a, b) => b.card.ti - a.card.ti || (b.holo ? 1 : 0) - (a.holo ? 1 : 0) || a.card.rank - b.card.rank);
@@ -585,6 +652,7 @@
 
   // ---------- events ----------
   document.addEventListener('click', async (e) => {
+    { const nv = document.querySelector('nav.main.open'); if (nv && !e.target.closest('[data-act="nav-more"]')) nv.classList.remove('open'); }
     const t = e.target.closest('[data-act]'); if (!t) return;
     const act = t.dataset.act, id = t.dataset.id; unlockAudio(); applyAudio();
     switch (act) {
@@ -596,6 +664,10 @@
       case 'home-tab': homeTab = t.dataset.tab; refreshHomeTabs(); break;
       case 'redeem': redeemModal(); break;
       case 'edit-profile': editProfile(); break;
+      case 'showcase': showcaseModal(); break;
+      case 'nav-more': { const n = t.closest('nav'); const o = n.classList.toggle('open'); t.setAttribute('aria-expanded', String(o)); break; }
+      case 'wish': { if (S.wish[id]) delete S.wish[id]; else S.wish[id] = 1; save(); closeModal(); cardModal(id); route(); toast(S.wish[id] ? 'Added to your wishlist. Others can see it when they trade with you.' : 'Removed from your wishlist'); break; }
+      case 'ann-x': { try { const d = JSON.parse(localStorage.getItem('ss-gacha-ann') || '[]'); d.push(id); localStorage.setItem('ss-gacha-ann', JSON.stringify(d.slice(-30))); } catch (e) { /* ignore */ } const b = t.closest('.ann'); if (b) b.remove(); break; }
       case 'fav': { const x = S.cards[id]; if (x) { x.f = x.f ? 0 : 1; save(); closeModal(); cardModal(id); route(); } break; }
     }
   });
@@ -616,18 +688,19 @@
     });
   })();
 
-  const PAGES = { home: pageHome, collection: pageCollection, index: pageIndex, leaderboard: () => net.pagePlayers(), players: () => net.pagePlayers(), trades: () => net.pageTrades(), profile: pageProfile, options: pageSettings, admin: () => admin.page() };
+  const PAGES = { home: pageHome, collection: pageCollection, index: pageIndex, leaderboard: () => net.pagePlayers(), players: () => net.pagePlayers(), trades: () => net.pageTrades(), board: () => net.pageBoard(), profile: pageProfile, options: pageSettings, admin: () => admin.page() };
   function route() {
     if (!auth.loggedIn()) { renderHeader(); auth.page(); document.title = 'Sign in · Special Strike Gacha'; return; }
     const h = (location.hash.slice(1) || 'home'), fn = h.indexOf('user-') === 0 ? () => net.pageUser(h.slice(5)) : (PAGES[h] || pageHome);
     renderHeader(); fn(); updateHud();
+    if (net.state.cfg) { const a = annHTML(); if (a) main().insertAdjacentHTML('afterbegin', a); }
     document.title = 'Special Strike Gacha';
   }
   addEventListener('hashchange', () => { route(); scrollTo(0, 0); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) updateHud(); });
   setInterval(updateHud, 1000);
   applyAudio();
-  const ctx = { G, S: () => S, save, toast, modal, closeModal, esc, $, $$, cardHTML, tilt, avatarHTML, bannerCSS, profileHTML, route, renderHeader, fmt, uid, normalize, hasCopy, takeCopy, addCopy, busy: () => opening,
+  const ctx = { copyTray, G, S: () => S, save, toast, modal, closeModal, esc, $, $$, cardHTML, tilt, avatarHTML, bannerCSS, profileHTML, route, renderHeader, fmt, uid, normalize, hasCopy, takeCopy, addCopy, busy: () => opening,
     restore: (j) => { S = normalize(Object.assign({}, j, { account: S.account || null })); save(); location.reload(); },
     loggedIn: () => !!(auth && auth.loggedIn()), onSync: () => { if (auth) auth.watch(); },
     fresh, adopt: (j) => { S = normalize(j); save(true); }, rerenderSettings: () => pageSettings(),
@@ -642,7 +715,7 @@
         Object.keys(cc).forEach((id) => { const a = next.cards[id], b = cc[id];
           if (!a) next.cards[id] = b; else { a.n = Math.max(a.n, b.n); a.h = Math.min(a.n, Math.max(a.h || 0, b.h || 0)); a.f = a.f || b.f ? 1 : 0; a.t = Math.min(a.t || b.t, b.t || a.t); a.l = Math.max(a.l || 0, b.l || 0); } });
         const cloudNewer = p.mod > (S.mod || 0);
-        next.codes = Array.from(new Set((next.codes || []).concat(raw.codes || []))); next.granted = Object.assign({}, S.granted || {});
+        next.codes = Array.from(new Set((next.codes || []).concat(raw.codes || []))); next.wish = Object.assign({}, raw.wish || {}, next.wish || {}); next.granted = Object.assign({}, S.granted || {});
         // Take over the cloud's applied-gift list, except for removals this device has not applied yet (it must still apply them, or old cards would come back).
         const pend = {}; net.state.grants.forEach((g) => { if (g.wipe || g.take.length || g.opened != null) pend[g.gid] = 1; });
         Object.keys(raw.granted || {}).forEach((k) => { if (!pend[k] || (S.granted || {})[k]) next.granted[k] = raw.granted[k]; });
@@ -660,7 +733,7 @@
   net.loadCache(); // show admin-made card changes straight away; the online sync refreshes them
   // ---------- auto update ----------
   // version.json holds the newest version number. A tab running an older one reloads itself (after uploading its save), so old tabs do not overwrite newer data.
-  const VERSION = 10;
+  const VERSION = 15;
   async function checkVersion() {
     try {
       const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;

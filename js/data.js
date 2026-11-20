@@ -159,7 +159,7 @@ The Big J Mythic`;
   // Admin config (stored online by the admin page): { blocked: [{id,name}], edits: { cardId: {name,tier,cat} }, added: [{id,name,cat,tier}] }
   const isObj = function (x) { return x && typeof x === 'object' && !Array.isArray(x); };
   function cleanConfig(b) {
-    const o = { blocked: [], edits: {}, added: [], tiers: [], sets: [], tierEdits: {}, setEdits: {}, events: [], settings: { holoMult: 2 } };
+    const o = { blocked: [], edits: {}, added: [], tiers: [], sets: [], tierEdits: {}, setEdits: {}, events: [], codes: [], announce: [], log: [], settings: { holoMult: 2 } };
     if (!isObj(b)) return o;
     const nmOk = function (v, n) { v = String(v == null ? '' : v).replace(/\s+/g, ' ').trim(); return v.length >= 1 && v.length <= n && /^[A-Za-z0-9 ]+$/.test(v) ? v : null; };
     const tierNames = TIER0.slice(), catNames = CAT_BASE.slice();
@@ -198,6 +198,19 @@ The Big J Mythic`;
       o.events.push({ id: x.id, name: String(x.name == null ? '' : x.name).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 40) || 'Power hour', kind: x.kind === 'holo' ? 'holo' : 'weight', scope: scope, value: scope === 'all' || scope === 'rare' ? '' : val,
         mult: Math.min(1000, Math.max(0.01, +(+x.mult).toFixed(3) || 2)), start: +x.start || 0, end: end });
     });
+    // Pack codes made in the admin panel: a code word that gives packs and/or cards, once per save.
+    if (Array.isArray(b.codes)) b.codes.slice(0, 100).forEach(function (x) {
+      if (!isObj(x)) return; const code = String(x.code == null ? '' : x.code).toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 24); if (code.length < 2 || o.codes.some(function (y) { return y.code === code; })) return;
+      const cards = Array.isArray(x.cards) ? x.cards.filter(function (id) { return typeof id === 'string' && id.length < 100; }).slice(0, 20) : [];
+      const packs = Math.min(1000, Math.max(0, Math.floor(+x.packs) || 0)); if (!packs && !cards.length) return;
+      o.codes.push({ code: code, packs: packs, cards: cards, note: String(x.note == null ? '' : x.note).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 60), off: !!x.off, max: Math.min(100000, Math.max(0, Math.floor(+x.max) || 0)), until: Math.max(0, +x.until || 0) });
+    });
+    // Announcements shown as a banner to every player, and the admin activity log (newest first).
+    if (Array.isArray(b.announce)) b.announce.slice(0, 5).forEach(function (x) {
+      if (!isObj(x)) return; const text = String(x.text == null ? '' : x.text).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 240); if (!text) return;
+      o.announce.push({ id: String(x.id || '').replace(/[^a-z0-9]/g, '').slice(0, 20) || String(o.announce.length), text: text, kind: x.kind === 'event' || x.kind === 'warn' ? x.kind : 'info', until: Math.max(0, +x.until || 0), at: +x.at || 0 });
+    });
+    if (Array.isArray(b.log)) b.log.slice(0, 100).forEach(function (x) { if (isObj(x) && x.text) o.log.push({ at: +x.at || 0, text: String(x.text).replace(/[\r\n\t]+/g, ' ').slice(0, 140) }); });
     if (Array.isArray(b.blocked)) b.blocked.slice(0, 500).forEach(function (x) {
       if (x && typeof x.id === 'string' && /^[a-z0-9]{6,40}$/.test(x.id)) o.blocked.push({ id: x.id, name: String(x.name == null ? 'Player' : x.name).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 20) || 'Player' });
     });
@@ -291,10 +304,29 @@ The Big J Mythic`;
 
   // ---- power hours ----
   // Every running event whose scope matches the card multiplies its drop weight (kind 'weight') or its skibidi chance (kind 'holo').
+  function findCode(raw) {
+    const k = String(raw || '').trim().toUpperCase(); if (!k) return null;
+    const a = CONFIG.codes.find(function (c) { return c.code === k; }); if (a) return a.off ? null : { code: k, packs: a.packs, cards: a.cards, max: a.max, until: a.until, managed: true };
+    const st = Object.keys(CODES).find(function (x) { return x.toUpperCase() === k; }); return st ? Object.assign({ code: k }, CODES[st]) : null;
+  }
+  // Profile badges, worked out from a player's stats (nothing is stored). rank = leaderboard position by score, if known.
+  function badgesOf(cards, opened, rank) {
+    const out = [], ids = Object.keys(cards).filter(function (id) { return BYID[id] && cards[id] && cards[id].n > 0; });
+    let sk = 0, best = null, score = 0; ids.forEach(function (id) { const c = BYID[id]; score += cardScore(c, cards[id]); if (cards[id].h > 0) sk++; if (!best || c.ti > best.ti) best = c; });
+    const add = function (ic, name, tip) { out.push({ ic: ic, name: name, tip: tip }); };
+    if (rank >= 1 && rank <= 3) add(['👑', '🥈', '🥉'][rank - 1], '#' + rank + ' on the leaderboard', 'Currently number ' + rank + ' by score');
+    [[2000, '🏭', 'Pack machine'], [500, '📦', 'Pack hoarder'], [100, '🎁', 'Pack fan'], [1, '🎴', 'First pack']].some(function (r) { if (opened >= r[0]) { add(r[1], r[2], 'Opened ' + r[0] + '+ packs'); return true; } return false; });
+    [[50000, '🏆', 'Legend'], [10000, '🥇', 'Veteran'], [1000, '🥉', 'Collector']].some(function (r) { if (score >= r[0]) { add(r[1], r[2], r[0].toLocaleString('en-GB') + '+ points'); return true; } return false; });
+    [[10, '✨', 'Skibidi star'], [1, '✦', 'First skibidi']].some(function (r) { if (sk >= r[0]) { add(r[1], r[2], r[0] + '+ skibidi cards'); return true; } return false; });
+    if (best && best.ti >= TIERS.length - 2 && TIERS.length > 3) add('💎', 'Owns ' + best.tier, 'Has a ' + best.tier + ' card (' + best.name + ')');
+    Object.keys(CATS).forEach(function (k) { const all = CARDS.filter(function (c) { return c.cat === k && !c.off; }); if (all.length >= 3 && all.every(function (c) { return cards[c.id] && cards[c.id].n > 0; })) add('📚', k + ' complete', 'Owns every ' + k + ' card'); });
+    const live = CARDS.filter(function (c) { return !c.off; }); if (live.length && live.every(function (c) { return cards[c.id] && cards[c.id].n > 0; })) add('🌟', 'Completionist', 'Owns every card in the game');
+    return out;
+  }
   function eventsNow(now) { now = now || Date.now(); return CONFIG.events.filter(function (e) { return e.start <= now && e.end > now; }); }
   function evHit(e, c) { return e.scope === 'all' || (e.scope === 'rare' && c.fx >= 2) || (e.scope === 'tier' && c.tier === e.value) || (e.scope === 'set' && c.cat === e.value) || (e.scope === 'card' && c.id === e.value); }
   function eventMult(c, kind, now) { let m = 1; eventsNow(now).forEach(function (e) { if (e.kind === (kind || 'weight') && evHit(e, c)) m *= e.mult; }); return m; }
 
-  window.SSG = { GS: GS, TIER_DEF: TIER_DEF, CAT_DEF: CAT_DEF, cardScore: cardScore, scoreOf: scoreOf, eventsNow: eventsNow, eventMult: eventMult, evHit: evHit, applyConfig: applyConfig, cleanConfig: cleanConfig, getConfig: function () { return CONFIG; }, BASE: BASE, TIERS: TIERS, TIER_COLOR: TIER_COLOR, CATS: CATS, CARDS: CARDS, BYID: BYID, BYTIER: BYTIER, POOL: POOL, MONSTER_POOL: MONSTER_POOL, MONSTER_CHANCE: MONSTER_CHANCE,
+  window.SSG = { badgesOf: badgesOf, findCode: findCode, GS: GS, TIER_DEF: TIER_DEF, CAT_DEF: CAT_DEF, cardScore: cardScore, scoreOf: scoreOf, eventsNow: eventsNow, eventMult: eventMult, evHit: evHit, applyConfig: applyConfig, cleanConfig: cleanConfig, getConfig: function () { return CONFIG; }, BASE: BASE, TIERS: TIERS, TIER_COLOR: TIER_COLOR, CATS: CATS, CARDS: CARDS, BYID: BYID, BYTIER: BYTIER, POOL: POOL, MONSTER_POOL: MONSTER_POOL, MONSTER_CHANCE: MONSTER_CHANCE,
     BASE_WEIGHTS: BASE_WEIGHTS, TIER_FX: TIER_FX, TIER0: TIER0, CAT_BASE: CAT_BASE, SELL: SELL, POINTS: POINTS, CODES: CODES, DIFFS: DIFFS, hash: hash, rng: rng };
 })();
