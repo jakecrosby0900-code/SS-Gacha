@@ -54,3 +54,15 @@ Open tabs check `version.json` every couple of minutes and reload themselves whe
 - Opening several packs at once slices open a stack; the home pile shows how many packs you hold.
 - Trades and the board use the same variant-aware card picker (normal / skibidi).
 - New **Monster** rarity (a little rarer than Sigma) and an updated roster (ROTA and HORROR sets added).
+
+## v17 notes
+- Home timer is back to the circular ring.
+- Profile: banner no longer covers the name/bio.
+- Skibidi holo foil is a soft sheen that keeps the artwork's contrast.
+- Showcase replaced by a **Best cards** row (your 7 most valuable) at the bottom of every profile; pick favourites via Favorite cards.
+
+## v18 notes
+- Packs are now 3D foil pouches with crimped edges and a moving holo sheen; they tilt with your pointer on the home page and on the opening screen.
+
+## v19 notes
+- Opening a stack of packs shows a fanned deck with shadows.

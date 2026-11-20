@@ -165,6 +165,19 @@
       ${o.copiesText || o.count > 1 ? `<span class="copies">${o.copiesText || '×' + o.count}</span>` : ''}${o.holo ? '<span class="holo-badge">✦ SKIBIDI</span>' : ''}${o.fav ? '<span class="fav">★</span>' : ''}${o.locked ? '' : `<span class="pts">${o.holo ? c.pts * G.GS.holoMult : c.pts} pt${(o.holo ? c.pts * G.GS.holoMult : c.pts) === 1 ? '' : 's'}</span>`}
     </div>`;
   }
+  // 3D tilt for packs: rotates toward the pointer and moves the foil sheen.
+  function packTilt(el) {
+    if (!el || el._pt) return; el._pt = 1;
+    el.addEventListener('pointermove', (e) => {
+      if (e.buttons || reduceMotion()) return;
+      const b = el.getBoundingClientRect(), x = (e.clientX - b.left) / b.width, y = (e.clientY - b.top) / b.height;
+      el.classList.add('tilting');
+      el.style.setProperty('--pry', ((x - .5) * 34).toFixed(1) + 'deg'); el.style.setProperty('--prx', ((.5 - y) * 26).toFixed(1) + 'deg');
+      el.style.setProperty('--mx', (x * 100).toFixed(0) + '%'); el.style.setProperty('--my', (y * 100).toFixed(0) + '%');
+    });
+    const off = () => { el.classList.remove('tilting'); el.style.setProperty('--pry', '0deg'); el.style.setProperty('--prx', '0deg'); };
+    el.addEventListener('pointerleave', off); el.addEventListener('pointerdown', off);
+  }
   function tilt(el) {
     if (reduceMotion()) return;
     el.addEventListener('pointerenter', () => el.classList.add('tilting'));
@@ -210,12 +223,13 @@
     tick();
     $$('[data-hud="packs"]').forEach((e) => (e.textContent = S.packs));
     const stk = $('[data-stack]'); if (stk && +stk.dataset.n !== S.packs) { stk.dataset.n = S.packs; stk.innerHTML = pileHTML(S.packs, 'fan'); const pk = stk.closest('.pack'); if (pk) pk.style.setProperty('--cnt', pileCount(S.packs)); }
-    const d = D(), pill = $('[data-nextpill]');
-    if (pill) {
-      const full = S.packs >= d.cap, iv = d.interval * 60000, left = Math.max(0, iv - (Date.now() - S.last));
-      pill.classList.toggle('full', full);
-      pill.textContent = full ? 'PACK STORAGE FULL' : `NEXT PACK IN ${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, '0')}`;
-      const sub = $('[data-nextsub]'); if (sub) sub.textContent = full ? 'Open a pack to resume earning.' : `A new pack every ${d.interval} minutes while you have room.`;
+    const d = D(), ring = $('[data-ring]');
+    if (ring) {
+      const full = S.packs >= d.cap, iv = d.interval * 60000, left = Math.max(0, iv - (Date.now() - S.last)), C = 2 * Math.PI * 52;
+      ring.style.strokeDasharray = C.toFixed(1); ring.style.strokeDashoffset = (full ? 0 : C * (left / iv)).toFixed(1);
+      $('[data-ringtime]').textContent = full ? 'FULL' : `${Math.floor(left / 60000)}:${String(Math.floor(left / 1000) % 60).padStart(2, '0')}`;
+      $('[data-ringlabel]').textContent = full ? 'pack storage' : 'next pack';
+      ring.closest('.ring-wrap').classList.toggle('full', full);
     }
     const pc = $('[data-packcount]'); if (pc) pc.innerHTML = `${S.packs} <small>/ ${d.cap}</small>`;
     $$('[data-needpack]').forEach((b) => (b.disabled = S.packs < 1 || opening));
@@ -274,31 +288,6 @@
     const now = Date.now(), list = (net.state.cfg.announce || []).filter((a) => (!a.until || a.until > now) && hid.indexOf(a.id + ':' + a.at) < 0);
     return list.map((a) => `<div class="ann ann-${a.kind}" role="status"><span class="ann-ic">${a.kind === 'warn' ? '⚠️' : a.kind === 'event' ? '🎉' : '📣'}</span><span class="ann-t">${esc(a.text)}</span><button type="button" class="ann-x" data-act="ann-x" data-id="${esc(a.id + ':' + a.at)}" aria-label="Dismiss">✕</button></div>`).join('');
   }
-  // The player's top 5: their own picks (entries are "id|0" normal or "id|1" skibidi), or automatically their five most valuable cards.
-  function showcaseList(cards, show) {
-    const own = (id, h) => BYID[id] && cards[id] && (h ? cards[id].h > 0 : cards[id].n - cards[id].h > 0);
-    let list = (show || []).map((x) => x.split('|')).filter(([id, h]) => own(id, +h)).map(([id, h]) => [id, +h]).slice(0, 5);
-    if (!list.length) list = Object.keys(cards).filter((id) => BYID[id] && cards[id].n > 0).map((id) => [id, cards[id].h > 0 ? 1 : 0])
-      .sort((a, b) => BYID[b[0]].pts * (b[1] ? G.GS.holoMult : 1) - BYID[a[0]].pts * (a[1] ? G.GS.holoMult : 1) || BYID[b[0]].ti - BYID[a[0]].ti || BYID[a[0]].rank - BYID[b[0]].rank).slice(0, 5);
-    return list;
-  }
-  const showcaseHTML = (cards, show, mine, src) => { const l = showcaseList(cards, show); return l.length ? `<section><div class="row wrap between"><h2>Showcase</h2>${mine ? '<button class="btn sm" type="button" data-act="showcase">✎ Choose cards</button>' : ''}</div><div class="card-row">${l.map(([id, h]) => `<button class="card-btn" data-act="card" data-id="${id}" data-var="${h}"${src ? ` data-src="${esc(src)}"` : ''}>${cardHTML(BYID[id], { holo: !!h })}</button>`).join('')}</div></section>` : ''; };
-  function showcaseModal() {
-    const opts = []; Object.keys(S.cards).filter((id) => BYID[id] && S.cards[id].n > 0).sort((a, b) => BYID[b].ti - BYID[a].ti || BYID[a].rank - BYID[b].rank).forEach((id) => { const e = S.cards[id]; if (e.n - e.h > 0) opts.push(id + '|0'); if (e.h > 0) opts.push(id + '|1'); });
-    const pick = showcaseList(S.cards, S.showcase).map(([id, h]) => id + '|' + h); let q = '';
-    const bg = modal(`<h2>Your showcase</h2><p class="muted small">Pick up to 5 cards to show at the top of your profile. Leave it empty and your 5 most valuable cards are shown.</p>
-      <label class="f">Search<input id="scQ" type="search" placeholder="Card name" autocomplete="off"></label><div class="sc-grid" id="scGrid"></div>
-      <div class="row wrap" style="margin-top:14px"><button class="btn primary" id="scSave" type="button">Save (<span id="scN"></span>/5)</button><button class="btn" id="scAuto" type="button">Use my top 5</button><button class="btn" data-act="close-modal" type="button">Cancel</button></div>`, 'wide');
-    const draw = () => { const f = q.trim().toLowerCase();
-      $('#scGrid', bg).innerHTML = opts.filter((k) => !f || BYID[k.split('|')[0]].name.toLowerCase().includes(f)).map((k) => { const [id, h] = k.split('|'), on = pick.indexOf(k) >= 0;
-        return `<button type="button" class="tr-pickcard ${on ? 'picked' : ''}" data-sc="${k}" aria-pressed="${on}">${cardHTML(BYID[id], { holo: h === '1', size: 84 })}${on ? `<span class="tr-n">${pick.indexOf(k) + 1}</span>` : ''}</button>`; }).join('') || '<p class="muted small">No cards.</p>';
-      $('#scN', bg).textContent = pick.length; };
-    draw();
-    $('#scQ', bg).oninput = (e) => { q = e.target.value; draw(); };
-    $('#scGrid', bg).onclick = (e) => { const b = e.target.closest('[data-sc]'); if (!b) return; const k = b.dataset.sc, i = pick.indexOf(k); if (i >= 0) pick.splice(i, 1); else if (pick.length < 5) pick.push(k); else toast('Up to 5 cards. Tap one to remove it first.', true); draw(); };
-    $('#scSave', bg).onclick = () => { S.showcase = pick.slice(); save(); closeModal(bg); toast('Showcase saved'); route(); };
-    $('#scAuto', bg).onclick = () => { S.showcase = []; save(); closeModal(bg); toast('Showing your top 5'); route(); };
-  }
   // Tiered badges for the profile: each has up to 5 levels and a bar towards the next one. Worked out from the collection, nothing is stored.
   const BADGE_DEFS = [
     ['Dedicated', '📦', [1, 100, 500, 2000, 5000], (m) => m.opened, 'packs opened'],
@@ -333,11 +322,12 @@
     const byRar = (a, b) => BYID[b[0]].ti - BYID[a[0]].ti || BYID[a[0]].rank - BYID[b[0]].rank;
     const recent = ents.slice().sort((a, b) => lastSeen(b[1]) - lastSeen(a[1])).slice(0, 12);
     const favs = ents.filter(([, e]) => e.f).sort(byRar);
+    const best = ents.slice().sort((a, b) => BYID[b[0]].pts * (b[1].h > 0 ? G.GS.holoMult : 1) - BYID[a[0]].pts * (a[1].h > 0 ? G.GS.holoMult : 1) || byRar(a, b)).slice(0, 7);
     const sc = ov.score != null ? ov.score : G.scoreOf(cards), uniq = ov.unique != null ? ov.unique : ents.length, sk = ov.skibidi != null ? ov.skibidi : ents.filter(([, e]) => e.h > 0).length;
     const copies = ents.reduce((a, [, e]) => a + e.n, 0), total = CARDS.length || 1, bio = (p.bio || '').trim();
     const tiles = [[fmt(sc), 'Points'], [pct2(uniq / total * 100), `Completion (${uniq} / ${CARDS.length})`], [ov.lite ? '–' : fmt(copies), 'Cards owned'], [pct2(sk / total * 100), `Skibidi (${sk} / ${CARDS.length})`], [fmt(stats.opened || 0), 'Packs opened']];
     const sections = ov.lite ? `<p class="muted">Only a summary is available right now. Connect GitHub in Settings to see their cards.</p>`
-      : `${showcaseHTML(cards, ov.show, ov.mine, ov.src)}<section><h2>Favorite cards</h2>${row(favs, ov.mine ? 'No favorites yet. Click a card and press Favorite.' : 'No favorites yet.')}</section><section><h2>Recently obtained</h2>${row(recent, 'No cards yet.')}</section>${full && !ov.mine ? `<section><h2>Collection <span class="muted small">${ents.length} cards</span></h2>${row(ents.slice().sort(byRar), 'Nothing yet.')}</section>` : ''}`;
+      : `<section><h2>Favorite cards</h2>${row(favs, ov.mine ? 'No favorites yet. Click a card and press Favorite.' : 'No favorites yet.')}</section><section><h2>Recently obtained</h2>${row(recent, 'No cards yet.')}</section>${full && !ov.mine ? `<section><h2>Collection <span class="muted small">${ents.length} cards</span></h2>${row(ents.slice().sort(byRar), 'Nothing yet.')}</section>` : ''}`;
     return `<section class="pf2"><div class="pf2-banner" style="${bannerCSS(p)}"><span class="pf2-joined">Joined ${joinedTxt(p.joined)}</span></div>
         <div class="pf2-head"><div class="pf2-av">${avatarHTML(104, p)}${ov.rank > 0 ? `<span class="pf2-rank"><b>#${fmt(ov.rank)}</b><small>RANK</small></span>` : ''}</div>
           <div class="pf2-id"><h1>${esc(p.name)}${ov.online ? ' <span class="online-dot" title="Online now"></span>' : ''}${ov.acct && ov.acct.toLowerCase() !== String(p.name).toLowerCase() ? ` <span class="pf2-user">@${esc(ov.acct)}</span>` : ''}</h1><p class="pf2-bio ${bio ? '' : 'muted'}">${bio ? esc(bio) : 'No bio yet.'}</p></div>
@@ -345,10 +335,10 @@
       ${ov.after || ''}
       <section class="panel prog"><h2>Collection progress</h2><div class="bar thick"><i style="width:${Math.min(100, uniq / total * 100)}%"></i></div><div class="stat-tiles five">${tiles.map(([v, l]) => `<div class="stat-tile"><b>${v}</b><span>${l}</span></div>`).join('')}</div></section>
       ${ov.lite ? '' : `<section><h2>Badges</h2>${badgeTilesHTML(tierBadges(cards, stats.opened || 0, ov.rank || 0))}</section>`}
-      ${sections}${ov.tail || ''}`;
+      ${sections}${ov.lite ? '' : `<section><h2>Best cards</h2>${best.length ? `<div class="best-row">${best.map(([id, e]) => `<button class="card-btn" data-act="card" data-id="${id}"${src}>${cardHTML(BYID[id], { holo: e.h > 0, count: e.n, fav: e.f })}</button>`).join('')}</div>` : '<div class="muted">Your best cards show up here once you pull some.</div>'}</section>`}${ov.tail || ''}`;
   }
   function pageProfile() {
-    main().innerHTML = profileHTML(S.profile, S.cards, S.stats, '<button class="btn primary" data-act="showcase">Customize</button><button class="btn" data-act="edit-profile">Edit profile</button><a class="btn" href="#collection">View collection</a>', false, { mine: true, show: S.showcase, acct: S.account, rank: net.state.loaded ? net.rankOf(S.profile) : 0 });
+    main().innerHTML = profileHTML(S.profile, S.cards, S.stats, '<button class="btn" data-act="edit-profile">Edit profile</button><a class="btn" href="#collection">View collection</a>', false, { mine: true, show: S.showcase, acct: S.account, rank: net.state.loaded ? net.rankOf(S.profile) : 0 });
     $$('.card', main()).forEach(tilt); if (Date.now() - net.state.last > 20000) net.cycle();
   }
 
@@ -429,7 +419,7 @@
         <div class="h2-left"><p class="eyebrow">PACKS AVAILABLE</p><div class="h2-count" data-packcount aria-live="polite"></div><p class="muted small">One pack every ${d.interval} minutes, up to ${d.cap} stored. They keep building up while you're away.</p></div>
         <div class="h2-mid"><button class="pack" data-act="open-1" data-needpack aria-label="Open a pack" style="--cnt:${pileCount(S.packs)}"><span class="stack" data-stack data-n="${S.packs}">${pileHTML(S.packs, 'fan')}</span></button>
           <div class="row center"><button class="btn primary" data-act="open-1" data-needpack>Open pack</button><button class="btn" data-act="open-all" data-needall hidden>Open all</button></div></div>
-        <div class="h2-right"><span class="pill" data-nextpill></span><p class="muted small" data-nextsub></p>
+        <div class="h2-right"><div class="ring-wrap" role="timer" aria-label="Time until the next free pack"><svg class="ring" viewBox="0 0 120 120" aria-hidden="true"><circle class="ring-bg" cx="60" cy="60" r="52"/><circle class="ring-fg" data-ring cx="60" cy="60" r="52" transform="rotate(-90 60 60)"/></svg><div class="ring-text"><b data-ringtime>--:--</b><span data-ringlabel>next pack</span></div></div>
           <form class="codebox" id="homeCodeForm" autocomplete="off"><input id="homeCode" placeholder="Have a code?" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Pack code"><button class="btn sm" type="submit">Redeem</button></form></div>
       </section>
       ${powerBanner()}${Object.keys(S.cards).length || S.stats.opened ? '' : '<div class="welcome"><b>New here?</b> Tap <i>Open pack</i>, then drag across the top of the pack to rip it open. Every card you pull counts towards your score.</div>'}
@@ -440,7 +430,7 @@
       <section><h2>Featured: the rarest cards in the game</h2><div class="card-row h">${featured.map((c) => { const x = S.cards[c.id]; return `<button class="card-btn" data-act="card" data-id="${c.id}">${cardHTML(c, { ghost: !x, holo: x && x.h > 0, count: x && x.n })}</button>`; }).join('')}</div></section>
       <div class="feeds"><section class="panel feed"><h2>Recent trades</h2><div id="feedTrades">${tradesFeedHTML()}</div></section><section class="panel feed"><h2>Community rare pulls</h2><div id="feedPulls">${pullsFeedHTML()}</div></section></div>
       <p class="muted small hint">Shortcuts: <kbd>O</kbd> open pack · <kbd>A</kbd> open all · <kbd>1</kbd>–<kbd>7</kbd> switch pages · <kbd>/</kbd> search · right-click any card for its odds</p>`;
-    $$('.card', main()).forEach(tilt); updateHud(); if (net.enabled() && Date.now() - net.state.last > 20000) net.cycle();
+    $$('.h2-mid .pack', main()).forEach(packTilt); $$('.card', main()).forEach(tilt); updateHud(); if (net.enabled() && Date.now() - net.state.last > 20000) net.cycle();
   }
 
   const colState = { cat: 'all', tier: 'all', show: 'owned', sort: 'rank', q: '' };
@@ -610,7 +600,7 @@
     if (S.packs < D().cap) S.last = Math.max(S.last, Date.now() - (Date.now() - S.last)); save();
     const eatenAll = results.flat().filter((o) => o.eaten); let all = results.flat().filter((o) => !o.eaten); const single = n === 1;
     const ov = document.createElement('div'); ov.className = 'opening'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', 'Opening ' + (single ? 'a pack' : n + ' packs'));
-    ov.innerHTML = `<canvas aria-hidden="true"></canvas><div class="flash"></div><button class="btn skip">Skip</button><p class="sr-only" aria-live="assertive" id="announce"></p><div class="stage-pack"><div class="pack" style="--cnt:${pileCount(n)}">${pileHTML(n, 'tight')}</div></div><p class="tap-hint">${single ? 'Drag across the top of the pack to rip it open' : `Drag across the top to slice all ${n} packs open at once`}</p>`;
+    ov.innerHTML = `<canvas aria-hidden="true"></canvas><div class="flash"></div><button class="btn skip">Skip</button><p class="sr-only" aria-live="assertive" id="announce"></p><div class="stage-pack"><div class="pack${n > 1 ? ' multi' : ''}" style="--cnt:${pileCount(n)}">${pileHTML(n, 'tight')}</div></div><p class="tap-hint">${single ? 'Drag across the top of the pack to rip it open' : `Drag across the top to slice all ${n} packs open at once`}</p>`;
     document.body.append(ov); document.documentElement.classList.add('modal-open', 'pack-open');
     const fx = particles($('canvas', ov)); let skipped = false;
     const wait = (ms) => sleep(skipped || reduceMotion() ? Math.min(ms, 25) : ms), say = (t) => ($('#announce', ov).textContent = t);
@@ -618,7 +608,7 @@
     const stage = $('.stage-pack', ov);
     // Rip it open: press near the top of the pack and drag across. (Enter / Space or Skip also tear it, for keyboards.)
     const tapColors = ['#b794ff', '#4ade80', '#fff', '#8b5cf6'];
-    const pack0 = $('.pack', stage); stage.style.touchAction = 'none'; stage.tabIndex = 0; stage.setAttribute('aria-label', single ? 'Pack. Drag across the top to rip it open, or press Enter.' : n + ' packs stacked. Drag across the top to slice them all open, or press Enter.');
+    const pack0 = $('.pack', stage); packTilt(pack0); stage.style.touchAction = 'none'; stage.tabIndex = 0; stage.setAttribute('aria-label', single ? 'Pack. Drag across the top to rip it open, or press Enter.' : n + ' packs stacked. Drag across the top to slice them all open, or press Enter.');
     const ripped = new Promise((resolve) => {
       let drag = null, lastTick = 0, done = false;
       const set = (v) => { stage.style.setProperty('--rip', v.toFixed(3)); };
@@ -717,7 +707,6 @@
       case 'close-pop': popClose(); break;
       case 'redeem': redeemModal(); break;
       case 'edit-profile': editProfile(); break;
-      case 'showcase': showcaseModal(); break;
       case 'nav-more': { const n = t.closest('nav'); const o = n.classList.toggle('open'); t.setAttribute('aria-expanded', String(o)); break; }
       case 'wish': { if (S.wish[id]) delete S.wish[id]; else S.wish[id] = 1; save(); route(); cardPopRefresh(); toast(S.wish[id] ? 'Added to your wishlist. Others can see it when they trade with you.' : 'Removed from your wishlist'); break; }
       case 'ann-x': { try { const d = JSON.parse(localStorage.getItem('ss-gacha-ann') || '[]'); d.push(id); localStorage.setItem('ss-gacha-ann', JSON.stringify(d.slice(-30))); } catch (e) { /* ignore */ } const b = t.closest('.ann'); if (b) b.remove(); break; }
@@ -788,7 +777,7 @@
   net.loadCache(); // show admin-made card changes straight away; the online sync refreshes them
   // ---------- auto update ----------
   // version.json holds the newest version number. A tab running an older one reloads itself (after uploading its save), so old tabs do not overwrite newer data.
-  const VERSION = 16;
+  const VERSION = 21;
   async function checkVersion() {
     try {
       const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;

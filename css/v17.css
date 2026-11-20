@@ -1,0 +1,68 @@
+/* v17 */
+/* Profile: only the avatar overlaps the banner; the name and bio always sit clear below it. */
+.pf2-head { margin-top: 0 !important; align-items: flex-start; padding-top: 0; }
+.pf2-av { margin-top: -52px; }
+.pf2-id { padding-top: 14px; padding-bottom: 0; }
+.pf2-actions { padding-top: 14px; padding-bottom: 0; }
+@media (max-width: 720px) {
+  .pf2-head { margin-top: 0 !important; gap: 10px 14px; }
+  .pf2-av { margin-top: -44px; }
+  .pf2-av .avatar { width: 88px !important; height: 88px !important; font-size: 2.2rem !important; display: grid !important; place-items: center; line-height: 1; }
+  .pf2-id { flex: 1 1 140px; padding-top: 8px; }
+  .pf2-actions { padding-top: 0; }
+}
+/* Holo: a gentle sheen that no longer blows out the artwork's contrast. */
+.card.holo .foil { mix-blend-mode: soft-light; opacity: .35;
+  background: linear-gradient(115deg, transparent 25%, rgba(255, 120, 170, .55) 38%, rgba(255, 230, 120, .5) 46%, rgba(110, 255, 190, .5) 54%, rgba(120, 170, 255, .55) 62%, transparent 75%);
+  background-size: 250% 250%; background-position: var(--mx) var(--my); }
+/* Best cards: one full row */
+.best-row { display: flex; flex-wrap: nowrap; gap: 12px; justify-content: space-between; overflow-x: auto; scroll-snap-type: x proximity; padding: 6px 2px 10px; }
+.best-row .card-btn { flex: none; scroll-snap-align: start; }
+.best-row .card { --cw: 132px; }
+@media (max-width: 720px) { .best-row { justify-content: flex-start; } .best-row .card { --cw: 120px; } }
+.pf2-av .avatar { display: grid !important; place-items: center; line-height: 1; text-align: center; padding: 0; }
+
+/* ===== v17: 3D foil pack ===== */
+.pack { transform-style: preserve-3d; --prx: 0deg; --pry: 0deg; --lift: 0px; }
+.pack, .h2-mid .pack, .hero-pack .pack { perspective: none; }
+.h2-mid .pack, .stage-pack .pack { transform: perspective(900px) translateY(var(--lift)) rotateX(var(--prx)) rotateY(var(--pry)); transition: transform .35s cubic-bezier(.2,.9,.2,1); }
+.h2-mid .pack:hover:not(:disabled) { --lift: -6px; transform: perspective(900px) translateY(var(--lift)) rotateX(var(--prx)) rotateY(var(--pry)); }
+.pack.tilting { transition: transform .08s linear !important; }
+.stage-pack .pack.tap { animation: none; }
+.pile { animation: packsway 7s ease-in-out infinite alternate; transform-style: preserve-3d; }
+@keyframes packsway { from { transform: rotateY(-6deg) rotateX(2deg); } to { transform: rotateY(6deg) rotateX(-2deg); } }
+.pack.tilting .pile { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) { .pile { animation: none; } }
+
+.bag { container-type: inline-size; }
+.bag-top, .bag-body { background: none; box-shadow: none; border-radius: 0; overflow: visible; }
+.bag-top { height: 11%; z-index: 2; clip-path: polygon(0.000% 0, 4.167% 6px, 8.333% 0, 12.500% 6px, 16.667% 0, 20.833% 6px, 25.000% 0, 29.167% 6px, 33.333% 0, 37.500% 6px, 41.667% 0, 45.833% 6px, 50.000% 0, 54.167% 6px, 58.333% 0, 62.500% 6px, 66.667% 0, 70.833% 6px, 75.000% 0, 79.167% 6px, 83.333% 0, 87.500% 6px, 91.667% 0, 95.833% 6px, 100.000% 0, 100% 100%, 0 100%); background-image: repeating-linear-gradient(90deg, rgba(255,255,255,.55) 0 1px, rgba(40,10,80,.28) 1px 3px), linear-gradient(180deg, #d9c8ff, #a77be8 70%, #9a6be0); transition: transform .5s cubic-bezier(.5,0,.9,.4), opacity .5s; }
+.bag-top .seam { display: none; }
+.bag-top::after { content: 'TEAR HERE ›'; position: absolute; left: 7%; bottom: 3px; font: 700 clamp(5px, 3.4cqw, 8px) var(--display); letter-spacing: .1em; color: rgba(255,255,255,.75); white-space: nowrap; }
+.bag-body { top: 9%; clip-path: polygon(0 0, 100% 0, 100.000% 100%, 95.833% calc(100% - 6px), 91.667% 100%, 87.500% calc(100% - 6px), 83.333% 100%, 79.167% calc(100% - 6px), 75.000% 100%, 70.833% calc(100% - 6px), 66.667% 100%, 62.500% calc(100% - 6px), 58.333% 100%, 54.167% calc(100% - 6px), 50.000% 100%, 45.833% calc(100% - 6px), 41.667% 100%, 37.500% calc(100% - 6px), 33.333% 100%, 29.167% calc(100% - 6px), 25.000% 100%, 20.833% calc(100% - 6px), 16.667% 100%, 12.500% calc(100% - 6px), 8.333% 100%, 4.167% calc(100% - 6px), 0.000% 100%);
+  background:
+    linear-gradient(105deg, transparent 18%, rgba(255,255,255,.32) 26%, transparent 34%, transparent 60%, rgba(255,255,255,.22) 68%, transparent 76%),
+    repeating-linear-gradient(96deg, rgba(255,255,255,.07) 0 3px, rgba(60,10,110,.08) 3px 7px),
+    linear-gradient(165deg, #8a5cf0 0%, #b565e0 38%, #e873b0 66%, #6fd6a0 112%); }
+.bag-body::before { content: ''; position: absolute; inset: 0; z-index: 3; pointer-events: none; mix-blend-mode: soft-light;
+  background: radial-gradient(circle at var(--mx, 35%) var(--my, 25%), rgba(255,255,255,.9), transparent 55%), linear-gradient(115deg, transparent 30%, rgba(120,255,220,.4) 45%, rgba(255,150,240,.4) 55%, transparent 70%); background-size: auto, 220% 220%; background-position: 0 0, var(--mx, 40%) var(--my, 40%); }
+.bag-body::after { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 1; background: linear-gradient(180deg, rgba(255,255,255,.35), transparent 14%, transparent 86%, rgba(255,255,255,.3)); }
+.bag-body .pack-face { background: none; z-index: 2; padding: 22% 0 14%; align-content: center; gap: 2px; }
+.bag-body .pack-face::before { content: ''; position: absolute; inset: 12% 8% 9%; border: 2px solid rgba(255,222,160,.75); border-radius: 10cqw; box-shadow: inset 0 0 0 1px rgba(255,255,255,.2), 0 0 0 1px rgba(80,30,10,.25); pointer-events: none; }
+.bag-body .pack-face svg { width: 30%; color: #fff4d6; filter: drop-shadow(0 2px 3px rgba(40,0,70,.6)); }
+.bag-body .pack-title { font: 800 15.5cqw/.95 var(--display); letter-spacing: .02em; color: #fff; -webkit-text-stroke: 1.4px #2a0a45; paint-order: stroke fill; text-shadow: 0 3px 0 #2a0a45, 0 6px 10px rgba(30,0,60,.45); }
+.bag-body .pack-sub { margin-top: 5%; padding: 2.4% 9%; font: 800 7cqw var(--display); letter-spacing: .14em; color: #4a2a0a; opacity: 1; background: linear-gradient(180deg, #f6dd9a, #d9aa55); clip-path: polygon(0 0, 100% 0, 96% 50%, 100% 100%, 0 100%, 4% 50%); box-shadow: 0 2px 6px rgba(0,0,0,.35); }
+.bag-body .glints i { background: #fff; }
+.pack:not(:disabled):hover .bag-body { filter: saturate(1.1); }
+.stage-pack .pack { width: min(64vw, 270px); height: min(90vw, 380px); }
+/* Stacks of packs open as a fanned deck: each pack behind tips a little further left, with its own shadow. */
+.stage-pack .pack.multi { width: min(50vw, 230px); height: min(70vw, 325px); filter: none; }
+.pile.tight { animation: none; --span: 56deg; }
+.pile.tight .ppk { transform-origin: 50% 165%; transform: rotate(calc((var(--k) - (var(--cnt) - 1) / 2) * min(8deg, var(--span) / (var(--cnt) - 1))));
+  filter: drop-shadow(-4px 3px 7px rgba(0, 0, 0, .5)) brightness(calc(.78 + var(--k) / var(--cnt) * .22)); }
+.pile.tight .ppk:last-child { filter: drop-shadow(-4px 8px 14px rgba(0, 0, 0, .55)); }
+.stage-pack .pack:not(.multi) .ppk { filter: drop-shadow(0 14px 18px rgba(0, 0, 0, .55)); }
+@media (max-width: 720px) { .pile.tight { --span: 36deg; transform: scale(.72); } }
+.stage-pack .pack.multi::before { display: none; }
+.pile.tight .ppk:not(:last-child) .bag-body::after { background: none; }
+.pile.tight .ppk:not(:last-child) .bag-body { background-image: linear-gradient(105deg, transparent 18%, rgba(255,255,255,.2) 26%, transparent 34%), linear-gradient(165deg, #8a5cf0 0%, #b565e0 45%, #d86fc0 100%); }
