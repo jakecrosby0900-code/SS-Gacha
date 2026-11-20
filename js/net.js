@@ -180,7 +180,7 @@
       Object.keys(s.cards).forEach((id) => { const e = s.cards[id]; if (BYID[id] && e.n > 0) cards[id] = [e.n, e.h || 0, e.f ? 1 : 0, e.t || 0, e.l || 0]; });
       const ws = weekStart(Date.now()); if (!s.wk || s.wk.t < ws) s.wk = { t: ws, s: G.scoreOf(s.cards) };
       return { t: 'player', v: 1, id: p.id, name: p.name, bio: p.bio || '', hue: p.hue, pfp: p.pfp, banner: p.banner, joined: p.joined, seen: Date.now(), opened: s.stats.opened, pulls: s.stats.pulls, cards: cards, wish: Object.keys(s.wish || {}).filter((x) => BYID[x]).slice(0, 300), wk: s.wk, show: s.showcase || [],
-        save: { wish: s.wish || {}, wk: s.wk, showcase: s.showcase || [], mod: s.mod || 0, granted: s.granted, packs: s.packs, last: s.last, sinceRare: s.sinceRare, started: s.started, stats: s.stats, codes: s.codes, net: s.net } };
+        save: { wish: s.wish || {}, wk: s.wk, showcase: s.showcase || [], mod: s.mod || 0, granted: s.granted, packs: s.packs, bonus: s.bonus || 0, last: s.last, sinceRare: s.sinceRare, started: s.started, stats: s.stats, codes: s.codes, net: s.net } };
     }
     // Uploads this device's save to the account's player issue. s.syncMod remembers which version the cloud holds, so a stale device can tell it must merge first.
     async function publish(force, keep) {
@@ -243,7 +243,7 @@
       net.grants.filter((g) => g.k === s.account || (g.k === '*' && mine && mine.created <= g.at && Date.now() - g.at < 1209600000)).forEach((g) => {
         if (s.granted[g.gid]) return;
         g.cards.forEach((it) => { for (let i = 0; i < it.n; i++) ctx.addCopy(it.id, it.h); });
-        if (g.packs) s.packs += g.packs;
+        if (g.packs) s.bonus = (s.bonus || 0) + g.packs;
         if (g.wipe) { Object.keys(s.cards).forEach((id) => { delete s.cards[id]; }); hist('The admin removed all your cards.'); }
         else if (g.take.length) { g.take.forEach((it) => { for (let i = 0; i < it.n; i++) { if (!ctx.takeCopy(it.id, it.h)) break; } }); hist('The admin removed: ' + g.take.map((it) => BYID[it.id].name + (it.h ? ' (skibidi)' : '') + (it.n > 1 ? ' x' + it.n : '')).join(', ') + '.'); }
         if (g.opened != null) { s.stats.opened = g.opened; hist('The admin set your packs opened to ' + g.opened + '.'); }

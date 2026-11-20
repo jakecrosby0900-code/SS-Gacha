@@ -66,3 +66,51 @@
 .stage-pack .pack.multi::before { display: none; }
 .pile.tight .ppk:not(:last-child) .bag-body::after { background: none; }
 .pile.tight .ppk:not(:last-child) .bag-body { background-image: linear-gradient(105deg, transparent 18%, rgba(255,255,255,.2) 26%, transparent 34%), linear-gradient(165deg, #8a5cf0 0%, #b565e0 45%, #d86fc0 100%); }
+/* Only the front pack tears; the ones behind quietly fade as it opens. */
+.stage-pack .ppk:not(:last-child) .bag-top, .stage-pack .ppk:not(:last-child) .bag-body { transform: none !important; animation: none !important; opacity: 1; }
+.stage-pack.torn .ppk:not(:last-child) { animation: packfade .5s .35s ease-in forwards; }
+@keyframes packfade { to { opacity: 0; } }
+/* Home pile: same arc as the opening screen, so every pack stays distinct. */
+.h2-mid .pack { --pw: 170px; width: calc(var(--pw) + (min(var(--cnt, 1), 10) - 1) * 20px); }
+.pile.fan { animation: none; --span: 40deg; }
+.pile.fan .ppk { left: 50%; right: auto; width: var(--pw, 170px); margin-left: calc(var(--pw, 170px) / -2); transform-origin: 50% 165%;
+  transform: rotate(calc((var(--k) - (var(--cnt) - 1) / 2) * min(6deg, var(--span) / (var(--cnt) - 1)))); transition: transform .35s cubic-bezier(.2, .9, .2, 1);
+  filter: drop-shadow(-3px 3px 6px rgba(0, 0, 0, .5)) brightness(calc(.8 + var(--k) / var(--cnt) * .2)); }
+.pile.fan .ppk:last-child { filter: drop-shadow(-3px 8px 12px rgba(0, 0, 0, .55)); }
+.pile.fan .ppk .bag-body { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .25); }
+@media (max-width: 720px) { .h2-mid .pack { --pw: 140px; width: calc(var(--pw) + (min(var(--cnt, 1), 10) - 1) * 14px); } .pile.fan { --span: 32deg; } }
+
+/* buttons always sit above the pack art */
+.h2-mid{isolation:isolate;gap:34px}
+.h2-mid .pack{position:relative;z-index:1}
+.h2-mid .row{position:relative;z-index:5}
+.h2-mid .row .btn{position:relative;z-index:5}
+/* bonus packs (codes and gifts) */
+.bonus-pill{display:inline-flex;align-items:center;margin-left:12px;padding:3px 12px;border-radius:99px;font:700 .8rem var(--display);letter-spacing:.04em;color:#04200f;background:linear-gradient(135deg,#7bf5ab,#22c55e);box-shadow:0 2px 12px rgba(34,197,94,.4);vertical-align:middle;white-space:nowrap}
+.bonus-mini{font:700 .74rem var(--display);color:#4ade80;margin-left:6px;font-style:normal}.bonus-mini:empty{display:none}
+/* keep the home panel's text inside the card on narrow screens */
+.hero2>*{min-width:0}
+.h2-left{max-width:100%}.h2-left p{overflow-wrap:break-word}
+@media(max-width:900px){.hero2{grid-template-columns:minmax(0,1fr)}.h2-left{text-align:center;padding:0 4px}}
+
+/* ===== Skibidi holo: prismatic foil + moving shine + rainbow rim + glittering sparkles ===== */
+@property --ang { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+.card.holo { --mx: 50%; --my: 38%; }
+/* rainbow foil: colour stripes that slide with your cursor, and drift on their own when idle */
+.card.holo .foil { opacity: .3; mix-blend-mode: color-dodge;
+  background: repeating-linear-gradient(115deg, rgba(255, 60, 140, 0) 0, rgba(255, 70, 150, .55) 5%, rgba(255, 225, 90, .55) 10%, rgba(90, 255, 175, .55) 15%, rgba(90, 175, 255, .55) 20%, rgba(190, 120, 255, .55) 25%, rgba(255, 60, 140, 0) 30%);
+  background-size: 280% 280%; background-position: var(--mx) var(--my); animation: holoDrift 7s ease-in-out infinite alternate; }
+@keyframes holoDrift { from { background-position: 0% 15%; } to { background-position: 100% 85%; } }
+.card.holo.tilting .foil { animation: none; opacity: .5; }
+/* a soft specular shine that follows the cursor */
+.card.holo .glare { opacity: .25; mix-blend-mode: overlay; background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 255, 255, .5), rgba(255, 255, 255, 0) 42%); transition: opacity .3s; }
+.card.holo.tilting .glare { opacity: .9; }
+/* iridescent rim */
+.card.holo::before { content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 2px; pointer-events: none; z-index: 7; opacity: .95;
+  background: conic-gradient(from var(--ang), #ff5fa2, #ffd24a, #5cf2b0, #5cc8ff, #b48bff, #ff5fa2);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  animation: holoSpin 6s linear infinite; }
+@keyframes holoSpin { to { --ang: 360deg; } }
+/* bigger, glowing sparkles */
+.card.holo .sparkle { width: .75em; height: .75em; z-index: 5; filter: drop-shadow(0 0 3px #fff) drop-shadow(0 0 7px #b48bff); }
+@media (prefers-reduced-motion: reduce) { .card.holo .foil, .card.holo::before { animation: none; } }

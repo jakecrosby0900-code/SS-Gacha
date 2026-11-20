@@ -19,7 +19,7 @@
   const KEY = 'ss-gacha-save-v1';
   let memorySave = null; // used if localStorage is blocked
   function fresh() {
-    return { v: 1, mod: 0, syncMod: 0, granted: {}, started: false, diff: 'sigma', packs: DIFFS.sigma.start, last: Date.now(), sinceRare: 0, cards: {}, wish: {}, wk: null, showcase: [],
+    return { v: 1, mod: 0, syncMod: 0, granted: {}, started: false, diff: 'sigma', packs: DIFFS.sigma.start, bonus: 0, last: Date.now(), sinceRare: 0, cards: {}, wish: {}, wk: null, showcase: [],
       stats: { opened: 0, pulls: 0 }, settings: { sound: true, volume: 0.6, motion: true, monster: false, share: true },
       // The "fake account": lives in the save file. id is random and only there so a leaderboard can tell players apart later.
       profile: { id: uid(), name: 'Player', bio: '', pfp: null, banner: null, hue: 28, joined: Date.now() }, codes: [], account: null,
@@ -37,7 +37,7 @@
     s.profile = { id: String(jp.id || f.profile.id).slice(0, 40), name: String(jp.name || 'Player').slice(0, 20), bio: String(jp.bio == null ? '' : jp.bio).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 120), pfp: okImg(jp.pfp), banner: okImg(jp.banner),
       hue: Number.isFinite(+jp.hue) ? ((+jp.hue % 360) + 360) % 360 : 28, joined: +jp.joined || (times.length ? Math.min.apply(null, times) : Date.now()) };
     s.granted = isObj(j.granted) ? j.granted : {};
-    s.mod = +j.mod || 0; s.syncMod = +j.syncMod || 0; s.settings.share = true; // sharing is always on now: the account save depends on it
+    s.bonus = Math.max(0, Math.floor(+j.bonus) || 0); s.mod = +j.mod || 0; s.syncMod = +j.syncMod || 0; s.settings.share = true; // sharing is always on now: the account save depends on it
     s.wish = {}; if (isObj(j.wish)) Object.keys(j.wish).slice(0, 400).forEach((id) => { if (j.wish[id]) s.wish[id] = 1; });
     s.showcase = Array.isArray(j.showcase) ? j.showcase.filter((x) => typeof x === 'string' && /\|[01]$/.test(x)).slice(0, 5) : [];
     s.wk = isObj(j.wk) && +j.wk.t > 0 ? { t: +j.wk.t, s: Math.max(0, +j.wk.s || 0) } : null;
@@ -64,6 +64,9 @@
   }
   const D = () => DIFFS.sigma;
   const CARDS_PER_PACK = 5;
+  // Packs you can open = packs earned by waiting (S.packs, capped) + bonus packs from codes and gifts (S.bonus, no cap, never expire).
+  const avail = () => S.packs + (S.bonus || 0);
+  const bonusPill = () => (S.bonus > 0 ? `<span class="bonus-pill" title="From codes and gifts. These don't count toward your pack limit.">+${S.bonus} bonus</span>` : '');
 
   // ---------- packs ----------
   function tick() {
@@ -214,7 +217,7 @@
     const cur0 = (location.hash.slice(1) || 'home').split('-')[0], cur = cur0 === 'user' ? 'leaderboard' : cur0 === 'players' ? 'leaderboard' : cur0 === 'trade' ? 'trades' : cur0 === 'post' ? 'board' : cur0;
     $('#header').innerHTML = `<a class="logo" href="#home">${BOLT}<span>Special Strike <b>Gacha</b></span></a>
       <nav class="main" aria-label="Main">${NAV.filter((n) => n[3]).map((n) => navLink(n, cur)).join('')}<button type="button" class="nav-more${NAV.some(([h, , , pri]) => !pri && h === cur) ? ' on' : ''}" data-act="nav-more" aria-expanded="false" style="order:${NAV.length}"><span class="ni" aria-hidden="true">⋯</span><span class="nl">More</span></button><div class="more-sheet">${NAV.filter((n) => !n[3]).map((n) => navLink(n, cur)).join('')}</div></nav>
-      <div class="top-right"><a class="chip" href="#home" title="Packs ready"><span class="pk"></span><b data-hud="packs">${S.packs}</b><small class="muted">/ ${D().cap}</small></a>
+      <div class="top-right"><a class="chip" href="#home" title="Packs ready"><span class="pk"></span><b data-hud="packs">${S.packs}</b><small class="muted">/ ${D().cap}</small><i class="bonus-mini" data-hud-bonus title="Bonus packs from codes and gifts">${S.bonus ? '+' + S.bonus : ''}</i></a>
         <a class="me" href="#profile" title="${esc(S.profile.name)}">${avatarHTML(32)}<i class="netdot" data-netdot></i></a>
         <button class="icon-btn" data-act="toggle-sound" aria-label="Sound ${S.settings.sound ? 'on' : 'off'}" title="Sound">${S.settings.sound ? '🔊' : '🔇'}</button></div>`;
     if (net) net.paint();
@@ -222,7 +225,8 @@
   function updateHud() {
     tick();
     $$('[data-hud="packs"]').forEach((e) => (e.textContent = S.packs));
-    const stk = $('[data-stack]'); if (stk && +stk.dataset.n !== S.packs) { stk.dataset.n = S.packs; stk.innerHTML = pileHTML(S.packs, 'fan'); const pk = stk.closest('.pack'); if (pk) pk.style.setProperty('--cnt', pileCount(S.packs)); }
+    $$('[data-hud-bonus]').forEach((e) => (e.textContent = S.bonus ? '+' + S.bonus : ''));
+    const stk = $('[data-stack]'); if (stk && +stk.dataset.n !== avail()) { stk.dataset.n = avail(); stk.innerHTML = pileHTML(avail(), 'fan'); const pk = stk.closest('.pack'); if (pk) pk.style.setProperty('--cnt', pileCount(avail())); }
     const d = D(), ring = $('[data-ring]');
     if (ring) {
       const full = S.packs >= d.cap, iv = d.interval * 60000, left = Math.max(0, iv - (Date.now() - S.last)), C = 2 * Math.PI * 52;
@@ -231,9 +235,9 @@
       $('[data-ringlabel]').textContent = full ? 'pack storage' : 'next pack';
       ring.closest('.ring-wrap').classList.toggle('full', full);
     }
-    const pc = $('[data-packcount]'); if (pc) pc.innerHTML = `${S.packs} <small>/ ${d.cap}</small>`;
-    $$('[data-needpack]').forEach((b) => (b.disabled = S.packs < 1 || opening));
-    $$('[data-needall]').forEach((b) => { b.hidden = S.packs < 2; b.textContent = `Open all (${S.packs})`; });
+    const pc = $('[data-packcount]'); if (pc) pc.innerHTML = `${S.packs} <small>/ ${d.cap}</small>${bonusPill()}`;
+    $$('[data-needpack]').forEach((b) => (b.disabled = avail() < 1 || opening));
+    $$('[data-needall]').forEach((b) => { b.hidden = avail() < 2; b.textContent = `Open all (${avail()})`; });
   }
 
   // ---------- profile ----------
@@ -355,11 +359,11 @@
     }
     if (S.codes.includes(k)) return false;
     S.codes.push(k); const now = Date.now(), got = [];
-    if (c.packs) S.packs += c.packs;
+    if (c.packs) S.bonus = (S.bonus || 0) + c.packs;
     (c.cards || []).forEach((id) => { if (!BYID[id]) return; const e = S.cards[id]; if (!e) S.cards[id] = { n: 1, h: 0, t: now, l: now, f: 0 }; else { e.n++; e.l = now; } got.push(BYID[id].name); });
     save(); renderHeader(); if (!opening) route();
     if (net.enabled()) net.logRedeem(k);
-    toast(`Code accepted${c.packs ? `: +${c.packs} pack${c.packs === 1 ? '' : 's'}` : ''}${got.length ? ` and ${got.join(', ')}` : ''}`);
+    toast(`Code accepted${c.packs ? `: +${c.packs} bonus pack${c.packs === 1 ? '' : 's'}` : ''}${got.length ? ` and ${got.join(', ')}` : ''}`);
     return true;
   }
   function redeemModal() {
@@ -417,7 +421,7 @@
     const tiles = [[pct2(have / total * 100), `Completion (${have} / ${CARDS.length})`], [fmt(copies), 'Cards owned'], [pct2(sk / total * 100), `Skibidi (${sk} / ${CARDS.length})`], [fmt(S.stats.opened), 'Packs opened'], [fmt(score()), 'Points']];
     main().innerHTML = `<section class="panel hero2">
         <div class="h2-left"><p class="eyebrow">PACKS AVAILABLE</p><div class="h2-count" data-packcount aria-live="polite"></div><p class="muted small">One pack every ${d.interval} minutes, up to ${d.cap} stored. They keep building up while you're away.</p></div>
-        <div class="h2-mid"><button class="pack" data-act="open-1" data-needpack aria-label="Open a pack" style="--cnt:${pileCount(S.packs)}"><span class="stack" data-stack data-n="${S.packs}">${pileHTML(S.packs, 'fan')}</span></button>
+        <div class="h2-mid"><button class="pack" data-act="open-1" data-needpack aria-label="Open a pack" style="--cnt:${pileCount(avail())}"><span class="stack" data-stack data-n="${avail()}">${pileHTML(avail(), 'fan')}</span></button>
           <div class="row center"><button class="btn primary" data-act="open-1" data-needpack>Open pack</button><button class="btn" data-act="open-all" data-needall hidden>Open all</button></div></div>
         <div class="h2-right"><div class="ring-wrap" role="timer" aria-label="Time until the next free pack"><svg class="ring" viewBox="0 0 120 120" aria-hidden="true"><circle class="ring-bg" cx="60" cy="60" r="52"/><circle class="ring-fg" data-ring cx="60" cy="60" r="52" transform="rotate(-90 60 60)"/></svg><div class="ring-text"><b data-ringtime>--:--</b><span data-ringlabel>next pack</span></div></div>
           <form class="codebox" id="homeCodeForm" autocomplete="off"><input id="homeCode" placeholder="Have a code?" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-label="Pack code"><button class="btn sm" type="submit">Redeem</button></form></div>
@@ -593,14 +597,14 @@
 
   const MONSTER = '<div class="monster-card"><svg viewBox="0 0 100 140" aria-hidden="true"><path d="M24 44 L16 16 L40 36Z M76 44 L84 16 L60 36Z" fill="#4ade80"/><ellipse cx="50" cy="80" rx="42" ry="48" fill="#4a24a0"/><circle cx="34" cy="64" r="11" fill="#fff"/><circle cx="66" cy="64" r="11" fill="#fff"/><circle cx="37" cy="66" r="5" fill="#111"/><circle cx="63" cy="66" r="5" fill="#111"/><path d="M20 94 Q50 132 80 94 Q50 106 20 94Z" fill="#12061f"/><path d="M27 96 L33 108 L39 98 L45 110 L51 98 L57 110 L63 98 L69 108 L75 96 Z" fill="#fff"/></svg><span>CHOMP</span></div>';
   async function openPacks(n) {
-    tick(); n = Math.min(n, S.packs);
+    tick(); n = Math.min(n, avail());
     if (opening || n < 1) return;
     opening = true; unlockAudio(); applyAudio(); updateHud();
-    const results = []; for (let i = 0; i < n; i++) { S.packs--; results.push(rollPack()); }
+    const results = []; for (let i = 0; i < n; i++) { if (S.packs > 0) S.packs--; else S.bonus--; results.push(rollPack()); }
     if (S.packs < D().cap) S.last = Math.max(S.last, Date.now() - (Date.now() - S.last)); save();
     const eatenAll = results.flat().filter((o) => o.eaten); let all = results.flat().filter((o) => !o.eaten); const single = n === 1;
     const ov = document.createElement('div'); ov.className = 'opening'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', 'Opening ' + (single ? 'a pack' : n + ' packs'));
-    ov.innerHTML = `<canvas aria-hidden="true"></canvas><div class="flash"></div><button class="btn skip">Skip</button><p class="sr-only" aria-live="assertive" id="announce"></p><div class="stage-pack"><div class="pack${n > 1 ? ' multi' : ''}" style="--cnt:${pileCount(n)}">${pileHTML(n, 'tight')}</div></div><p class="tap-hint">${single ? 'Drag across the top of the pack to rip it open' : `Drag across the top to slice all ${n} packs open at once`}</p>`;
+    ov.innerHTML = `<canvas aria-hidden="true"></canvas><div class="flash"></div><button class="btn skip">Skip</button><p class="sr-only" aria-live="assertive" id="announce"></p><div class="stage-pack"><div class="pack${n > 1 ? ' multi' : ''}" style="--cnt:${pileCount(n)}">${pileHTML(n, 'tight')}</div></div><p class="tap-hint">${single ? 'Drag across the top of the pack to rip it open' : `Drag across the top of the front pack to rip it open (all ${n} packs open together)`}</p>`;
     document.body.append(ov); document.documentElement.classList.add('modal-open', 'pack-open');
     const fx = particles($('canvas', ov)); let skipped = false;
     const wait = (ms) => sleep(skipped || reduceMotion() ? Math.min(ms, 25) : ms), say = (t) => ($('#announce', ov).textContent = t);
@@ -670,7 +674,7 @@
         <p class="row counts">${counts.map(([t, k]) => `<span class="${tcls(t)}"><span class="tier-text">${t}</span> ×${k}</span>`).join('')}${holos ? `<span class="holo-badge static">✦ SKIBIDI ×${holos}</span>` : ''}</p>
         <div class="card-grid summary-grid">${shown.map((o, i) => `<button class="card-btn" data-i="${i}">${cardHTML(o.card, { holo: o.holo })}${newLabel(o.isNew)}</button>`).join('')}</div>
         ${all.length > shown.length ? `<p class="muted small">Showing the best ${shown.length} of ${all.length} cards. All are saved to your collection.</p>` : ''}
-        <div class="row center">${S.packs >= 1 ? `<button class="btn primary" id="again">Open another (${S.packs} left)</button>` : ''}${S.packs >= 2 ? `<button class="btn" id="againAll">Open all (${S.packs})</button>` : ''}<a class="btn" href="#collection" id="toCol">View collection</a><button class="btn" id="done">Continue</button></div>`;
+        <div class="row center">${avail() >= 1 ? `<button class="btn primary" id="again">Open another (${avail()} left)</button>` : ''}${avail() >= 2 ? `<button class="btn" id="againAll">Open all (${avail()})</button>` : ''}<a class="btn" href="#collection" id="toCol">View collection</a><button class="btn" id="done">Continue</button></div>`;
       ov.append(sum); if (eatenAll.length) sum.insertAdjacentHTML('afterbegin', `<p class="monster-note">👹 The monster ate ${eatenAll.map((o) => '<b>' + esc(o.card.name) + '</b>').join(', ')}</p>`); $$('.card', sum).forEach((el, i) => { el.style.animationDelay = Math.min(i * 30, 900) + 'ms'; tilt(el); });
       if (all.some((o) => o.holo)) setTimeout(() => SFX.holo(), 200);
       $('#done', sum).focus({ preventScroll: true });
@@ -680,7 +684,7 @@
         if ($('#again', sum)) $('#again', sum).onclick = () => resolve('again'); if ($('#againAll', sum)) $('#againAll', sum).onclick = () => resolve('all');
       });
       finish();
-      if (act === 'again') setTimeout(() => openPacks(1), 60); else if (act === 'all') setTimeout(() => openPacks(S.packs), 60);
+      if (act === 'again') setTimeout(() => openPacks(1), 60); else if (act === 'all') setTimeout(() => openPacks(avail()), 60);
     } catch (err) { console.error(err); toast('Something went wrong showing the cards. They are saved in your collection.', true); finish(); }
   }
   async function specialReveal(ov, o, fx, isSkipped) {
@@ -702,7 +706,7 @@
       case 'close-modal': closeModal(t.closest('.modal-bg')); break;
       case 'toggle-sound': S.settings.sound = !S.settings.sound; applyAudio(); save(); renderHeader(); if (S.settings.sound) SFX.click(); break;
       case 'open-1': SFX.click(); openPacks(1); break;
-      case 'open-all': SFX.click(); openPacks(S.packs); break;
+      case 'open-all': SFX.click(); openPacks(avail()); break;
       case 'card': SFX.click(); cardPop(id, t, t.dataset.src); break;
       case 'close-pop': popClose(); break;
       case 'redeem': redeemModal(); break;
@@ -721,7 +725,7 @@
   // ---------- quality of life: keyboard shortcuts + pack count in tab title ----------
   (function () {
     const baseTitle = document.title.replace(/^\(\d+\)\s*/, '');
-    setInterval(() => { document.title = (S.packs > 0 ? `(${S.packs}) ` : '') + baseTitle; }, 1000);
+    setInterval(() => { document.title = (avail() > 0 ? `(${avail()}) ` : '') + baseTitle; }, 1000);
     document.addEventListener('keydown', (e) => {
       if (e.ctrlKey || e.metaKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test((e.target.tagName || ''))) return;
       if (document.documentElement.classList.contains('modal-open')) return;
@@ -777,7 +781,7 @@
   net.loadCache(); // show admin-made card changes straight away; the online sync refreshes them
   // ---------- auto update ----------
   // version.json holds the newest version number. A tab running an older one reloads itself (after uploading its save), so old tabs do not overwrite newer data.
-  const VERSION = 21;
+  const VERSION = 24;
   async function checkVersion() {
     try {
       const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;

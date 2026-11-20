@@ -426,7 +426,7 @@
       let q = '';
       const bg = ctx.modal(`<h2>${old ? 'Edit code' : 'New code'}</h2>
         <label class="f">Code word<input id="cgCode" maxlength="24" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="e.g. WELCOME" value="${esc(old ? old.code : '')}" ${old ? 'readonly' : ''}></label>
-        <div class="row wrap"><label class="f">Free packs<input id="cgPacks" type="number" min="0" max="1000" value="${old ? old.packs : 3}"></label><label class="f grow">Note (only you see it)<input id="cgNote" maxlength="60" value="${esc(old ? old.note : '')}"></label></div>
+        <div class="row wrap"><label class="f">Bonus packs<input id="cgPacks" type="number" min="0" max="1000" value="${old ? old.packs : 3}"></label><label class="f grow">Note (only you see it)<input id="cgNote" maxlength="60" value="${esc(old ? old.note : '')}"></label></div>
         <div class="row wrap"><label class="f">Max uses (0 = unlimited)<input id="cgMax" type="number" min="0" max="100000" value="${old ? old.max : 0}"></label>
         <label class="f">Expires in (hours)<input id="cgExp" type="number" min="0" max="8760" step="1" placeholder="${old && old.until ? 'leave blank to keep' : 'never'}"></label></div>
         <p class="muted small">${old && old.until ? (old.until > Date.now() ? 'Currently expires in ' + fmtLeft(old.until - Date.now()) + '. Type 0 to remove the expiry.' : 'This code has expired. Type a new number of hours to reopen it.') : 'Leave expiry blank for a code that never expires.'} Use limits count everyone who redeems it online.</p>
