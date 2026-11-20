@@ -10,3 +10,9 @@ window.SSG_NET = {
   repo: '',
   tokenEnc: ["WVo=","TW9iajdPMA==","SEw1RzRVRQ==","c3huNmEyaA==","anhzQjRqSA==","cUlWNjE2WA==","NTA3cEhyOA==","TzM3UFlMRw==","VTFGRllQeQ==","eE9VVG9fRQ==","MDd3TEpDNw==","M1ZCWkVRMA==","cGF0XzExQg==","Z2l0aHViXw=="]
 };
+
+// Discord sign-in (see README, "Sign in with Discord").
+// clientId: the "Client ID" of your Discord application (discord.com/developers/applications > your app > OAuth2). It is public, so it is safe here.
+//           Never put the Client Secret anywhere on this site.
+// redirect: leave empty to use this page's own address. Whatever it is, the exact same address must be added under OAuth2 > Redirects.
+window.SSG_DISCORD = { clientId: '1573467424521457815', redirect: '' };

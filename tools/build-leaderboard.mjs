@@ -23,10 +23,16 @@ for (const i of issues) {
 }
 G.applyConfig(cfgIssue ? cfgIssue.b : null, cardImgs);
 const BYID = G.BYID, blocked = new Set(G.getConfig().blocked.map((x) => x.id));
+// Only players that belong to a Discord account (account issue with v:2 and a Discord id) are listed. Old username/password accounts are ignored.
+const acctPids = new Set();
+for (const i of issues) {
+  let b; try { b = JSON.parse(i.body); } catch { continue; }
+  if (b && b.t === 'account' && b.v === 2 && /^\d{15,19}$/.test(b.did || '') && /^[a-z0-9]{6,40}$/.test(b.pid || '')) acctPids.add(b.pid);
+}
 const seen = {}, players = [];
 for (const i of issues.sort((a, b) => a.number - b.number)) {
   let b; try { b = JSON.parse(i.body); } catch { continue; }
-  if (!b || b.t !== 'player' || !/^[a-z0-9]{6,40}$/.test(b.id || '') || seen[b.id] || blocked.has(b.id)) continue;
+  if (!b || b.t !== 'player' || !/^[a-z0-9]{6,40}$/.test(b.id || '') || seen[b.id] || blocked.has(b.id) || !acctPids.has(b.id)) continue;
   seen[b.id] = 1;
   let score = 0, unique = 0, skibidi = 0, best = null;
   for (const [id, a] of Object.entries(b.cards || {})) {

@@ -1,5 +1,5 @@
 # Special Strike Gacha
-Open `index.html` (or run `python3 -m http.server` and visit localhost:8000). Players must sign in or create an account to play. Progress saves in the browser and, through the account, online.
+Open `index.html` (or run `python3 -m http.server` and visit localhost:8000). Players must sign in with Discord to play. Progress saves in the browser and, through the account, online.
 
 ## Card images (optional)
 With Node 18+: `node tools/fetch-images.mjs`. It downloads each character's main image from the Special Strike wiki into `images/cards/` and writes `js/images.js`.
@@ -22,12 +22,23 @@ Everything online runs through GitHub Issues, so there is no server. The game wo
 What it does: while the site is open it publishes your profile and collection to your own "player:..." issue about every 60 seconds. The Leaderboard page lists everyone, with search and profiles. Trades are "trade:..." issues; the offered cards are held until the other player answers.
 Anyone with the token can edit any issue, so this is built for friends, not for security.
 
-## Accounts (sign in / sign up)
-Nobody can play until they are signed in (`js/auth.js`). Accounts use the same GitHub Issues setup as the leaderboard, so the online setup above must be working.
-- Each account is an issue titled `account:<username>` holding the username, a salt and a PBKDF2 hash of the password. The password itself is never stored.
+## Accounts (Sign in with Discord)
+Nobody can play until they are signed in (`js/auth.js`). Sign-in uses Discord and needs no server. The online setup above must be working, because accounts live in GitHub Issues.
+- Each account is an issue titled `account:d<discord id>` holding the Discord ID, the Discord name at sign-up and the ID of the player's save. There are no passwords.
+- The first time someone signs in, an account is made and their profile starts with their Discord name and avatar. Both can still be changed in Edit profile; signing in again never overwrites them.
 - Your save uploads to your account a few seconds after every change (and when you close the tab). Signing in on a new device, or after clearing site data, loads it back. If two devices changed things, the saves are merged and no card is lost.
-- Players who already had progress keep it: when they create an account on their device, that save becomes the account's save. Signing in on another device loads the account's last published save.
-- Limits: this is a client-side gate, and the hashes are readable by anyone who can read the repo's issues. Fine for a friends game, not for anything sensitive.
+- Limits: this is a client-side gate. The page, not a server, decides who you are, so someone technical can pretend to be another Discord user. Fine for a friends game, not for anything sensitive. The Discord token is only used once to read the profile (ID, name, avatar) and is never stored.
+
+### Setting up Discord sign-in
+1. Go to https://discord.com/developers/applications > **New Application**.
+2. Open **OAuth2**. Copy the **Client ID** into `js/config.js` (`window.SSG_DISCORD.clientId`). Never put the Client Secret on the site; it is not needed.
+3. Under **OAuth2 > Redirects** add the exact address of the site, for example `https://yourname.github.io/SS-Gacha/` (with the trailing slash). For local testing also add `http://localhost:8000/`. If the address differs from the page's own, set it in `SSG_DISCORD.redirect`.
+4. Publish. The Discord button shows on the sign-in page.
+
+### Retiring the old username/password accounts (v27)
+- Old accounts are ignored by the site, their sessions are signed out, and players without a Discord account are hidden from the leaderboard. `data/leaderboard.json` was reset and is rebuilt by the Action, which also only lists Discord players.
+- Old progress is not carried over: everyone starts a fresh Discord account. (A device that never had an account keeps its local progress when its owner signs in with Discord for the first time.)
+- To also close the old issues, run once: `GITHUB_TOKEN=<token with Issues read & write> node tools/purge-old-accounts.mjs owner/repo` (prints what it would close), then add `--yes` to do it. It never touches Discord accounts, the admin config or card pictures.
 
 ## Admin page
 Settings > Admin: log in with the admin username and password, then open the Admin page (`js/admin.js`). It can:
@@ -66,3 +77,7 @@ Open tabs check `version.json` every couple of minutes and reload themselves whe
 
 ## v19 notes
 - Opening a stack of packs shows a fanned deck with shadows.
+
+## v27 notes
+- Sign in with Discord replaces usernames and passwords. Old accounts are retired (see Accounts).
+- Skibidi holo foil now covers the whole card, including the top and bottom strips.

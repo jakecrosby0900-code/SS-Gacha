@@ -781,7 +781,7 @@
   net.loadCache(); // show admin-made card changes straight away; the online sync refreshes them
   // ---------- auto update ----------
   // version.json holds the newest version number. A tab running an older one reloads itself (after uploading its save), so old tabs do not overwrite newer data.
-  const VERSION = 24;
+  const VERSION = 27;
   async function checkVersion() {
     try {
       const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;
@@ -797,6 +797,7 @@
   setInterval(() => { if (!document.hidden) checkVersion(); }, 120000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) checkVersion(); });
   setTimeout(checkVersion, 8000);
+  auth.consumeRedirect(); // finishes a sign-in if Discord just sent the player back
   tick(); route(); net.start();
   window.__ssg = { get S() { return S; }, save, route, net };
 })();

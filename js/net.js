@@ -111,8 +111,10 @@
         }
         else if (b.t === 'board' && idOk(b.pid)) { const ok = (a) => (Array.isArray(a) ? a.filter((x) => typeof x === 'string' && BYID[x.replace(/\|[01]$/, '')]).map((x) => (/\|0$/.test(x) ? x.slice(0, -2) : x)).slice(0, BOARD_CARDS) : []), want = ok(b.want), offer = ok(b.offer); if ((want.length || offer.length) && Date.now() - (+b.at || 0) < BOARD_MS) board.push({ num: num, id: String(b.id || num).slice(0, 24), pid: b.pid, name: nm(b.name), want: want, offer: offer, note: String(b.note || '').replace(/[\r\n\t]+/g, ' ').slice(0, 100), at: +b.at || 0 }); }
         else if (b.t === 'redeem' && typeof b.code === 'string' && idOk(b.pid)) { const k = b.pid + '|' + b.code; if (!seenRd[k]) { seenRd[k] = 1; redeems.push({ code: b.code.toUpperCase().slice(0, 24), pid: b.pid, name: nm(b.name), at: +b.at || 0 }); } }
-        else if (b.t === 'account' && typeof b.k === 'string' && /^[a-z0-9_]{3,20}$/.test(b.k) && typeof b.salt === 'string' && typeof b.hash === 'string' && idOk(b.pid)) {
-          if (!accounts[b.k] || accounts[b.k].num > num) accounts[b.k] = { k: b.k, u: String(b.u || b.k).slice(0, 20), salt: b.salt.slice(0, 64), hash: b.hash.slice(0, 128), iter: +b.iter || 0, pid: b.pid, created: +b.created || 0, num: num };
+        else if (b.t === 'account' && b.v === 2 && typeof b.did === 'string' && /^\d{15,19}$/.test(b.did) && idOk(b.pid)) {
+          // Discord accounts only. Old username/password accounts (no "did") are ignored, so they never count as accounts or reach the leaderboard.
+          const k = 'd' + b.did;
+          if (!accounts[k] || accounts[k].num > num) accounts[k] = { k: k, u: String(b.u || 'Player').slice(0, 20), did: b.did, pid: b.pid, created: +b.created || 0, num: num };
         }
       });
       net.cfgNum = cfgIssue ? cfgIssue.num : 0; net.imgNum = imgNum;
@@ -409,7 +411,7 @@
       return out.sort((a, b) => b.at - a.at).slice(0, limit || 12);
     }
     const TABS = [['score', 'Most points'], ['unique', 'Most unique cards'], ['opened', 'Most packs opened'], ['week', 'This week']];
-    const shown = () => net.dir.filter((p) => p.acct || !net.accounts.length || !net.loaded || !enabled());
+    const shown = () => net.dir.filter((p) => p.acct || !net.loaded || !enabled());
     const rankOf = (p) => { const l = shown().slice().sort((a, b) => b.score - a.score || a.name.localeCompare(b.name)); return l.findIndex((x) => x.id === p.id) + 1; };
     const leftText = (ms) => { const m = Math.max(1, Math.ceil(ms / 60000)), d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60); return d ? d + 'd ' + h + 'h' : h ? h + 'h ' + (m % 60) + 'm' : m + 'm'; };
     function pagePlayers() {
