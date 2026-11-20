@@ -1,8 +1,8 @@
 // Card data, tiers, difficulties. Everything is defined here so you can balance the game from one file.
 (function () {
-  const TIERS = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary', 'Mythic', 'Sigma'];
+  const TIERS = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary', 'Mythic', 'Sigma', 'Monster'];
   const TIER0 = TIERS.slice(); // the built-in rarities; the admin can add more between them (see rebuild)
-  const TIER_COLOR = { Common: '#8b97a3', Uncommon: '#4cc38a', Rare: '#4aa3ff', Epic: '#b36bff', Legendary: '#ffb02e', Mythic: '#ff4d6d', Sigma: '#ffffff' };
+  const TIER_COLOR = { Common: '#8b97a3', Uncommon: '#4cc38a', Rare: '#4aa3ff', Epic: '#b36bff', Legendary: '#ffb02e', Mythic: '#ff4d6d', Sigma: '#ffffff', Monster: '#34f5a0' };
 
   // Your roster, exactly as supplied: category header lines, then "Name Rarity" per line.
   const RAW = `SS
@@ -10,79 +10,129 @@ Freddy Common
 Bonnie Common
 Chica Common
 Foxy Common
-Chief Rare
-RXQ Rare
+Shadow Droid Common
+Golden Freddy Common
+RXQ Uncommon
 General Uncommon
 Mecha Rare
+Chief Rare
+Shadow Man Epic
+Obese Legendary
 
 SSR
 Freddy Common
 Bonnie Common
 Chica Common
 Foxy Common
-Springtrap Uncommon
-General Uncommon
-Withered Bonnie Uncommon
 Helpy Common
 Plushtrap Common
-Lefty Common
 Puppet Common
 Security Puppet Common
-Withered Chief Rare
-Berserk Chief Rare
-Corrupted Chief Rare
-QXR Uncommon
-Mecha Uncommon
-Glitchtrap Rare
-Bugtrap Epic
-Miniontrap Rare
-Scythetrap Rare
-Pittrap Rare
-Chester Uncommon
-Penguin Uncommon
-Candy Uncommon
-Cindy Uncommon
+Candy Common
+Cindy Common
+Blank Common
+Springtrap Uncommon
+Withered Bonnie Uncommon
+Lefty Uncommon
+Destroyed Foxy Uncommon
+Destroyed Chica Uncommon
+Destroyed Withered Bonnie Uncommon
+Destroyed Springtrap Uncommon
+Ennard Uncommon
 Rat Uncommon
 Cat Uncommon
 Vinnie Uncommon
-Destroyed Foxy Common
-Destroyed Chica Common
-Destroyed Withered Bonnie Common
-Destroyed Springtrap Common
-Ennard Uncommon
-Fredbro Rare
-Officer Egg Baby Mythic
-Bon Epic
+Bon Uncommon
+Fredbro Uncommon
+Mecha Uncommon
+General Rare
+Penguin Rare
+Chester Rare
+Miniontrap Rare
+Pittrap Rare
+Scythetrap Rare
+Withered Chief Rare
 German Freddy Rare
+QXR Epic
+Glitchtrap Epic
 Mighty Jimmy Epic
+Corrupted Chief Epic
+1, 2, and 3 Epic
+Bugtrap Legendary
+Berserk Chief Legendary
+Officer Egg Baby Mythic
+The End Mythic
 
 SS3
-Candy Rare
-Cindy Rare
-Blank Rare
-Rat Rare
-Cat Rare
+Ennard Common
+Cindy Common
+Blank Common
+Endo Fredbear Common
+Withered Bonnie Common
+Withered Chica Common
+Withered Foxy Common
+Rat Uncommon
+Cat Uncommon
+Candy Uncommon
+Withered Freddy Uncommon
+Fredbear Uncommon
 Vinnie Rare
-Ennard Rare
+RXQ Rare
+Hooded Guy Legendary
 
 SSC
-Redacted Mythic
+Stitchtrap Rare
+Shadowtrap Epic
 XQR Legendary
-Stitchtrap Legendary
-Shadowtrap Legendary
 The Mimic Legendary
+Redacted Mythic
 
 BU
-The Chud Mythic
+Infected Bonnie Common
+Infected Chica Common
+Infected Foxy Common
+Infected Springtrap Common
+Infected General Uncommon
+Infected Candy Uncommon
+RXQ Rare
+Glendo Legendary
+Fancy Scythetrap Legendary
 Revived Glitchtrap Mythic
-RXQ Legendary
+Humuhumunukunukuapua’a Mythic
 Wall Sigma
-The End (Robot Form) Mythic
+Horse Sigma
+
+ROTA
+Tinytrap Common
+FT1 Common
+Epilogue Golden Freddy Common
+Raine Common
+Molten Glitchtrap Uncommon
+Fametrap Uncommon
+Robobrute Rare
+Lankytrap Rare
+Reformed Chief Rare
+Roboclone Epic
+Springbonnie Epic
+Black Rabbit Epic
+Dream Machine Epic
+Robobun Legendary
+Split QXR Legendary
+Berserk Obese Legendary
+Scythe Supreme Mythic
+Robottrap Mythic
+Sparky Doooo Sigma
+
+HORROR
+Verity Rare
+Larper Larry Epic
+The Aura Farmer Legendary
+Lord Verity Legendary
 
 EXTRA
-SSO Chief Mythic
-Good Chief Mythic
-SS3 RXQ Mythic
+SSO Chief Epic
+Good Chief Epic
+SS3 RXQ Epic
 Split Sparky Doo Sigma
 The Shed Sigma
 Fazgirl Sigma
@@ -91,9 +141,9 @@ The Coon of Doom Sigma
 The Ringtone of Despair Sigma
 
 MONSTER
-The Big M Epic
-The Big G Legendary
-The Big J Mythic`;
+The Big M Monster
+The Big G Monster
+The Big J Monster`;
 
   // Colour of each set's card art and pack label.
   const CATS = {
@@ -103,6 +153,8 @@ The Big J Mythic`;
     SSC:   { hue: 268, name: 'SSC',   blurb: 'Few cards, all of them rare.' },
     BU:    { hue: 348, name: 'BU',    blurb: 'Glitched, revived and broken.' },
     EXTRA: { hue: 200, name: 'EXTRA', blurb: 'Odds and ends. Hard to find.' },
+    ROTA:  { hue: 318,  name: 'ROTA',  blurb: 'Robots, rabbits and rare machines.' },
+    HORROR: { hue: 96,  name: 'HORROR', blurb: 'The Horror Skunx crew.' },
     MONSTER: { hue: 135, name: 'MONSTER', blurb: 'Only drops while the monster is let in (Settings).', monster: true }
   };
 
@@ -113,15 +165,15 @@ The Big J Mythic`;
   function rng(seed) { let a = seed; return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
   // Points each card is worth, by tier. A player's score is the sum over every copy they own (skibidi copies count extra).
-  const POINTS = [1, 3, 8, 20, 50, 125, 400];
-  const W0 = [50, 28, 14, 5, 2, 0.8, 0.08], P0 = POINTS.slice(), C0 = Object.assign({}, TIER_COLOR);
+  const POINTS = [1, 3, 8, 20, 50, 125, 400, 600];
+  const W0 = [50, 28, 14, 5, 2, 0.8, 0.08, 0.05], P0 = POINTS.slice(), C0 = Object.assign({}, TIER_COLOR);
   const TIER_DEF = {}; TIER0.forEach(function (n, i) { TIER_DEF[n] = { color: C0[n], pts: P0[i], weight: W0[i] }; });
   // Game-wide settings the admin can change. holoMult: a skibidi (holo) copy is worth this many times a normal copy's points.
   const GS = { holoMult: 2 };
   // Collection score: every copy counts. A skibidi copy is worth holoMult times as much.
   function cardScore(c, e) { return c.pts * (e.n - e.h) + c.pts * GS.holoMult * e.h; }
   function scoreOf(cards) { let t = 0; Object.keys(cards).forEach(function (id) { const c = BYID[id], e = cards[id]; if (c && e && e.n > 0) t += cardScore(c, e); }); return t; }
-  const TIER_FX = [0, 1, 2, 3, 4, 5, 6]; // how fancy the reveal is (built-ins: their own index; custom rarities sit half a step above the one they follow)
+  const TIER_FX = [0, 1, 2, 3, 4, 5, 6, 7]; // how fancy the reveal is (built-ins: their own index; custom rarities sit half a step above the one they follow)
   // Base chance weight of each tier for one card slot, before a difficulty's luck is applied to Rare and above.
   const BASE_WEIGHTS = W0.slice();
 
@@ -142,7 +194,7 @@ The Big J Mythic`;
     const id = cat + ':' + baseName; // id keeps the original name so old saves still work
     if (cat === 'SS') ssNames[baseName] = true;
     const RENAME = { 'SSR:Mecha': 'Withered Mecha', 'SSR:General': 'The Cooler General' };
-    const EPI_SSR = ['Helpy', 'Lefty', 'Puppet', 'Security Puppet'];
+    const EPI_SSR = ['Helpy', 'Lefty', 'Puppet', 'Security Puppet', 'Plushtrap', 'Springtrap', 'Withered Bonnie'];
     const name = RENAME[id] || ((cat === 'SS3' || (cat === 'SSR' && (ssNames[baseName] || EPI_SSR.indexOf(baseName) >= 0))) ? 'Epilogue ' + baseName : baseName);
     BASE.push({ id: id, name: name, cat: cat, tier: tier });
   });
@@ -286,7 +338,7 @@ The Big J Mythic`;
   rebuild();
 
   // Coins gained when recycling a spare copy.
-  const SELL = [5, 12, 30, 80, 200, 500, 1500];
+  const SELL = [5, 12, 30, 80, 200, 500, 1500, 2500];
 
   // Difficulty settings. interval = minutes per free pack. luck multiplies the weight of Rare and above.
   // pity = packs in a row with nothing Rare+ before the next one is guaranteed (0 = off).

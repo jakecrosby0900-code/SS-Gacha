@@ -48,3 +48,9 @@ This check runs in the browser, so it keeps normal players out but is not real s
 
 ## Releasing an update
 Open tabs check `version.json` every couple of minutes and reload themselves when its number is higher than the `VERSION` constant in `js/app.js`. When you publish a new version, raise `VERSION` in `js/app.js` and `v` in `version.json` to the same new number (and the `?v=` on the script tags in `index.html` so browsers fetch fresh files).
+
+## v16 notes
+- Home has the code box, collection progress, recent/rarest rows and community feeds.
+- Opening several packs at once slices open a stack; the home pile shows how many packs you hold.
+- Trades and the board use the same variant-aware card picker (normal / skibidi).
+- New **Monster** rarity (a little rarer than Sigma) and an updated roster (ROTA and HORROR sets added).
