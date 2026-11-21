@@ -41,3 +41,25 @@
 /* A CSS filter on a preserve-3d element flattens it, which made the flipped card show a mirrored front instead of its back. Shadow each face instead. */
 .cv-3d { filter: none !important; }
 .cv-face { filter: drop-shadow(0 22px 26px rgba(0, 0, 0, .5)); }
+
+/* Card back must never show through once a card is flipped: hide every piece of it when it faces away (children and pseudo-elements do not inherit backface-visibility). */
+.card-back, .card-back::before, .card-back::after, .card-back svg { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.card-back svg { filter: none; }
+.face.back { z-index: 1; }
+.flipper.flipped .face.back, .flipper.flipped .face.back * { visibility: hidden; }
+
+/* Card page: the spinning card is a real slab: front and back faces plus four edge faces, a moving glare and a floor shadow. */
+.cv-3d { filter: none !important; transform-style: preserve-3d; }
+.cv-front { transform: translateZ(calc(var(--thick) / 2)); }
+.cv-back { transform: rotateY(180deg) translateZ(calc(var(--thick) / 2)); }
+.cv-face { filter: none; }
+.cv-seg { position: absolute; left: 0; top: 0; transform-origin: 50% 50%; pointer-events: none; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.cv-back .card-back { border-radius: calc(var(--cw) * .0648); }
+.cv-glare { position: absolute; inset: 0; border-radius: calc(var(--cw) * .0648); pointer-events: none; z-index: 5; mix-blend-mode: soft-light;
+  background: radial-gradient(circle at var(--gx, 50%) var(--gy, 40%), rgba(255, 255, 255, .55), rgba(255, 255, 255, 0) 55%); }
+.cv-stage { position: relative; filter: none; }
+.cv-stage::after { content: ''; position: absolute; left: 14%; right: 14%; bottom: 2px; height: 22px; border-radius: 50%; background: radial-gradient(ellipse, rgba(0, 0, 0, .5), transparent 70%); filter: blur(4px); pointer-events: none; z-index: -1; }
+
+/* Cards, packs and the opening screen are not text: dragging over them never selects anything. */
+.card, .card *, .card-back, .card-back *, .pack, .pack *, .ppk, .ppk *, .stage-pack, .stage-pack *, .opening, .opening .slot, .opening .slot *, .cv-stage, .cv-stage *, .flipper, .flipper *, .best-row, .card-btn { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.card img, .pack img, .card-back img { -webkit-user-drag: none; user-drag: none; }

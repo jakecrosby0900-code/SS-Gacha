@@ -670,7 +670,21 @@
     const e = cvCards()[id]; cv.v = e && e.h > 0 ? 1 : 0;
     modal('<div class="cv"></div>', 'cardview'); cvDraw();
   }
-  function cvApply() { const d = $('.cardview .cv-3d'); if (d) { d.style.setProperty('--rx', cv.rx + 'deg'); d.style.setProperty('--ry', cv.ry + 'deg'); } }
+  // The rim of the spinning card: its outline (straight sides plus the four rounded corners, each cut into short segments) extruded to the card's thickness, with a baked light from the top-left.
+  function cvSlab(w) {
+    const h = w * 1.4, R = w * 0.0648, T = Math.max(7, Math.round(w * 0.03)), N = 16, pts = [];
+    const arc = (cx, cy, a0) => { for (let i = 1; i < N; i++) { const t = (a0 + 90 * i / N) * Math.PI / 180; pts.push([cx + R * Math.cos(t), cy + R * Math.sin(t)]); } };
+    pts.push([R, 0], [w - R, 0]); arc(w - R, R, 270); pts.push([w, R], [w, h - R]); arc(w - R, h - R, 0); pts.push([w - R, h], [R, h]); arc(R, h - R, 90); pts.push([0, h - R], [0, R]); arc(R, R, 180);
+    let out = '';
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length], dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy); if (L < 0.01) continue;
+      const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2; let nx = dy / L, ny = -dx / L; let flip = 90; if (nx * (mx - w / 2) + ny * (my - h / 2) < 0) { nx = -nx; ny = -ny; flip = -90; }
+      const lit = Math.max(0, nx * -0.55 + ny * -0.7), light = Math.round(36 + 44 * lit);
+      out += `<i class="cv-seg" style="width:${(L + 1.2).toFixed(2)}px;height:${T}px;background:hsl(222 16% ${light}%);transform:translate3d(${(mx - L / 2 - 0.6).toFixed(2)}px,${(my - T / 2).toFixed(2)}px,0) rotateZ(${Math.atan2(dy, dx).toFixed(4)}rad) rotateX(${flip}deg)"></i>`;
+    }
+    return out;
+  }
+  function cvApply() { const d = $('.cardview .cv-3d'); if (d) { d.style.setProperty('--rx', cv.rx + 'deg'); d.style.setProperty('--ry', cv.ry + 'deg'); d.style.setProperty('--gx', (50 + Math.sin(cv.ry * Math.PI / 180) * 70).toFixed(1) + '%'); d.style.setProperty('--gy', (45 - Math.sin(cv.rx * Math.PI / 180) * 70).toFixed(1) + '%'); } }
   function cvDraw() {
     const box = $('.cardview .cv'); if (!box) return;
     const id = cv.id, c = BYID[id], o = cv.src ? net.state.dir.find((p) => p.id === cv.src) : null, who = o ? o.name : '', cards = cvCards(), e = cards[id], own = !!(e && e.n > 0), mine = !cv.src;
@@ -682,7 +696,7 @@
     const row = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`, mult = G.GS.holoMult, fn = (v) => G.GS.holoMult && fmtPts(v);
     const action = mine ? (own ? `<button class="btn sm" data-act="fav" data-id="${id}">${e.f ? '★ Unfavorite' : '☆ Favorite'}</button>` : `<button class="btn sm ${S.wish[id] ? 'primary' : ''}" data-act="wish" data-id="${id}">${S.wish[id] ? '🔖 On your wishlist' : '🔖 Add to wishlist'}</button>`) : (!(S.cards[id] && S.cards[id].n > 0) ? `<button class="btn sm ${S.wish[id] ? 'primary' : ''}" data-act="wish" data-id="${id}">${S.wish[id] ? '🔖 On your wishlist' : '🔖 Add to wishlist'}</button>` : '');
     const frame = box.querySelector('.cv-3d'), keep = !!frame && frame.dataset.id === id + ':' + cv.v + ':' + (hidden ? 1 : 0);
-    box.innerHTML = `<div class="cv-left"><div class="cv-stage no-tilt" title="Drag to spin"><div class="cv-3d" data-id="${id}:${cv.v}:${hidden ? 1 : 0}" style="--cw:${w}px;--rx:${cv.rx}deg;--ry:${cv.ry}deg"><div class="cv-face cv-front">${cardHTML(c, { holo: !!cv.v, size: w, locked: hidden && !!c.monster })}</div><div class="cv-face cv-back"><div class="card-back">${BOLT}</div></div></div></div>
+    box.innerHTML = `<div class="cv-left"><div class="cv-stage no-tilt" title="Drag to spin"><div class="cv-3d" data-id="${id}:${cv.v}:${hidden ? 1 : 0}" style="--cw:${w}px;--thick:${Math.max(7, Math.round(w * 0.03))}px;--rx:${cv.rx}deg;--ry:${cv.ry}deg"><div class="cv-face cv-front">${cardHTML(c, { holo: !!cv.v, size: w, locked: hidden && !!c.monster })}<i class="cv-glare"></i></div>${cvSlab(w)}<div class="cv-face cv-back"><div class="card-back">${BOLT}</div></div></div></div>
         <div class="cv-ctl"><button class="btn sm" data-cv="flip" type="button">Flip</button><button class="btn sm" data-cv="reset" type="button">Reset</button><span class="muted small">Drag to spin</span></div></div>
       <div class="cv-right"><h2 class="cv-title">#${c.rank} ${hidden ? '???' : esc(c.name)}</h2>
         <div class="cv-tier tier-text ${tcls(c.tier)}">${c.tier.toUpperCase()}</div>
@@ -1021,7 +1035,7 @@
   net.loadCache(); // show admin-made card changes straight away; the online sync refreshes them
   // ---------- auto update ----------
   // version.json holds the newest version number. A tab running an older one reloads itself (after uploading its save), so old tabs do not overwrite newer data.
-  const VERSION = 39;
+  const VERSION = 44;
   async function checkVersion() {
     try {
       const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;

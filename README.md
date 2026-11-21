@@ -141,3 +141,20 @@ Open tabs check `version.json` every couple of minutes and reload themselves whe
 
 ## v39 notes
 - Closed the hairline gap between the tear opening and the pack body.
+
+## v40 notes
+- Fixed the card-back design staying on cards after they flip in the pack opening.
+- The spinning card in the card page has real thickness (edge layers).
+
+## v41 notes
+- Card page 3D rebuilt as a real slab: front/back faces, four edge faces, moving glare and a floor shadow.
+- Cards, packs and the opening screen can no longer be text-selected by dragging.
+
+## v42 notes
+- Card page 3D: the card rim follows the rounded corners (outline extruded in short segments with baked lighting), so it reads as a real thick card.
+
+## v43 notes
+- Card rim: only outward-facing segments are drawn (back sides hidden), which removes the stray tab at the corners.
+
+## v44 notes
+- Card rim corners use 16 segments with overlap, so no seam lines show on the bevels.
