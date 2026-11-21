@@ -81,3 +81,21 @@ Open tabs check `version.json` every couple of minutes and reload themselves whe
 ## v27 notes
 - Sign in with Discord replaces usernames and passwords. Old accounts are retired (see Accounts).
 - Skibidi holo foil now covers the whole card, including the top and bottom strips.
+
+## v28 notes
+- Click any badge on a profile for details: what it is for, your current progress, what is needed for the next level and every level's target.
+- Best cards row has room around it, so a hovered card is no longer clipped.
+- The profile rank sits under the picture instead of over it.
+
+## v29 notes
+- **Quiet refreshes**: background syncs redraw without the entrance animation, keep your scroll position and never interrupt typing. Updates no longer reload the page by themselves: a small "A new version is out. Refresh" bar appears instead.
+- **Stays signed in**: an account is only treated as deleted if it is missing from several complete listings over 3+ minutes, and a save that lost its account link is re-attached instead of signing you out.
+- **Card close-up**: in the card popup, click any copy to see it large (arrows or the on-screen buttons step through copies). Each copy shows what it is worth.
+- **Dupes**: the Nth copy of a card is worth 1/N of the first (skibidi copies are counted first).
+- **Pack opening**: the pack tears, light bursts out, the cards jump out backs-first, land face down and flip one at a time. Card size no longer changes on hover while opening, and the layout no longer shifts (scrollbar gutter, reserved label space).
+- **Monster**: every card in the MONSTER set is of the Monster rarity, and *Ess Ess Gee* was added. Monster cards still only drop (or arrive from codes/gifts) while the monster is let in.
+- **Admin**: rename rarities and sets (every reference is updated); drag sets (or use arrow keys on the handle) to change their Index order; the two old built-in codes (SIGMA, MGJ) are moved into the editable Codes list the first time the admin page opens, so they can be deleted.
+- **Notifications** (bell in the header): trade offers, counter-offers, answers to your offers, friend requests and answers, messages, comments on your board posts, new badges, power hours, admin gifts and image decisions.
+- **Friends** (More > Friends): add players, accept/decline, message friends (comments on a `friend:` issue), remove friends. **Board comments**: every board post has a comments thread.
+- **Card image requests**: Settings > Request a card image. Admin > Image requests shows each picture next to the card; Approve makes it the card's picture for everyone.
+- **Whitelist**: accounts made after `WL_START` in `js/data.js` see a "Waiting for approval" page until the admin approves them (Admin > Players > Waiting for approval). Older accounts are let in automatically; "Revoke access" in an account's menu removes access. The admin can sign in from the waiting page ("I am the admin"). Like everything here this is a client-side gate, fine for a friends game, not real security. Pending players are not uploaded or listed on the leaderboard.

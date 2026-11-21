@@ -143,7 +143,8 @@ The Ringtone of Despair Sigma
 MONSTER
 The Big M Monster
 The Big G Monster
-The Big J Monster`;
+The Big J Monster
+Ess Ess Gee Monster`;
 
   // Colour of each set's card art and pack label.
   const CATS = {
@@ -159,7 +160,10 @@ The Big J Monster`;
   };
 
   const CAT_BASE = Object.keys(CATS); // the built-in sets; the admin can add more
-  const CAT_DEF = {}; CAT_BASE.forEach(function (k) { CAT_DEF[k] = { hue: CATS[k].hue, blurb: CATS[k].blurb }; });
+  const CAT_DEF = {}; CAT_BASE.forEach(function (k) { CAT_DEF[k] = { hue: CATS[k].hue, blurb: CATS[k].blurb, monster: !!CATS[k].monster }; });
+  // Display name -> built-in name, for built-in rarities and sets (they can be renamed by the admin). Filled in place by rebuildTiers().
+  const TIER_KEY = {}, CAT_KEY = {};
+  let CAT_ORDER = CAT_BASE.slice(); // default set order (used for card ranks, so dragging sets around never changes ranks)
 
   function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
   function rng(seed) { let a = seed; return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
@@ -170,9 +174,14 @@ The Big J Monster`;
   const TIER_DEF = {}; TIER0.forEach(function (n, i) { TIER_DEF[n] = { color: C0[n], pts: P0[i], weight: W0[i] }; });
   // Game-wide settings the admin can change. holoMult: a skibidi (holo) copy is worth this many times a normal copy's points.
   const GS = { holoMult: 2 };
-  // Collection score: every copy counts. A skibidi copy is worth holoMult times as much.
-  function cardScore(c, e) { return c.pts * (e.n - e.h) + c.pts * GS.holoMult * e.h; }
-  function scoreOf(cards) { let t = 0; Object.keys(cards).forEach(function (id) { const c = BYID[id], e = cards[id]; if (c && e && e.n > 0) t += cardScore(c, e); }); return t; }
+  // Collection score. The Nth copy of a card is worth 1/N of the first copy (so a 3rd copy is worth a third). Skibidi copies are counted first
+  // and are worth holoMult times as much. Harmonic sums are cached because scores are worked out for every player.
+  const HARM = [0];
+  function harm(n) { for (let i = HARM.length; i <= n; i++) HARM[i] = HARM[i - 1] + 1 / i; return HARM[n]; }
+  function cardScore(c, e) { const n = Math.max(0, Math.min(99999, e.n | 0)), h = Math.max(0, Math.min(n, e.h | 0)); return c.pts * (GS.holoMult * harm(h) + (harm(n) - harm(h))); }
+  // What the k-th copy (1 = first) of a card is worth, skibidi or not.
+  function copyValue(c, k, holo) { return c.pts * (holo ? GS.holoMult : 1) / Math.max(1, k); }
+  function scoreOf(cards) { let t = 0; Object.keys(cards).forEach(function (id) { const c = BYID[id], e = cards[id]; if (c && e && e.n > 0) t += cardScore(c, e); }); return Math.round(t); }
   const TIER_FX = [0, 1, 2, 3, 4, 5, 6, 7]; // how fancy the reveal is (built-ins: their own index; custom rarities sit half a step above the one they follow)
   // Base chance weight of each tier for one card slot, before a difficulty's luck is applied to Rare and above.
   const BASE_WEIGHTS = W0.slice();
@@ -211,24 +220,36 @@ The Big J Monster`;
   // Admin config (stored online by the admin page): { blocked: [{id,name}], edits: { cardId: {name,tier,cat} }, added: [{id,name,cat,tier}] }
   const isObj = function (x) { return x && typeof x === 'object' && !Array.isArray(x); };
   function cleanConfig(b) {
-    const o = { blocked: [], edits: {}, added: [], tiers: [], sets: [], tierEdits: {}, setEdits: {}, events: [], codes: [], announce: [], log: [], settings: { holoMult: 2 } };
+    const o = { blocked: [], edits: {}, added: [], tiers: [], sets: [], tierEdits: {}, setEdits: {}, setOrder: [], codesSeeded: false, approved: [], revoked: [], events: [], codes: [], announce: [], log: [], settings: { holoMult: 2 } };
     if (!isObj(b)) return o;
     const nmOk = function (v, n) { v = String(v == null ? '' : v).replace(/\s+/g, ' ').trim(); return v.length >= 1 && v.length <= n && /^[A-Za-z0-9 ]+$/.test(v) ? v : null; };
-    const tierNames = TIER0.slice(), catNames = CAT_BASE.slice();
+    // Built-in rarities and sets can be renamed (tierEdits[name].name / setEdits[name].name). Everything else in the config may refer to a
+    // built-in by its original or its new name; normT / normC turn either into the current one.
+    const tierDisp = {}, catDisp = {}, taken = {};
+    TIER0.forEach(function (n) { taken[n.toLowerCase()] = 1; }); CAT_BASE.forEach(function (n) { taken[n.toLowerCase()] = 1; });
+    const renameOf = function (edits, list, max, map) {
+      if (!isObj(edits)) return;
+      list.forEach(function (n) { const e = edits[n], v = isObj(e) && nmOk(e.name, max); if (!v || v === n) return; const k = v.toLowerCase(); if (taken[k]) return; taken[k] = 1; map[n] = v; });
+    };
+    renameOf(b.tierEdits, TIER0, 14, tierDisp); renameOf(b.setEdits, CAT_BASE, 12, catDisp);
+    const normT = function (x) { return tierDisp[x] || x; }, normC = function (x) { return catDisp[x] || x; };
+    const tierNames = TIER0.map(normT), catNames = CAT_BASE.map(normC);
+    const nameFree = function (n, names, orig) { const k = n.toLowerCase(); return !names.some(function (t) { return t.toLowerCase() === k; }) && !orig.some(function (t) { return t.toLowerCase() === k; }) && !Object.keys(tierDisp).concat(Object.keys(catDisp)).some(function (t) { return t.toLowerCase() === k; }); };
     // Custom sets and rarities first, so cards can use them.
     if (Array.isArray(b.sets)) b.sets.slice(0, 40).forEach(function (x) {
-      const n = isObj(x) && nmOk(x.name, 12); if (!n || catNames.indexOf(n) >= 0) return;
+      const n = isObj(x) && nmOk(x.name, 12); if (!n || !nameFree(n, catNames, CAT_BASE)) return;
       catNames.push(n); o.sets.push({ name: n, hue: Number.isFinite(+x.hue) ? ((Math.round(+x.hue) % 360) + 360) % 360 : 200, blurb: String(x.blurb == null ? '' : x.blurb).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 90) });
     });
     if (Array.isArray(b.tiers)) b.tiers.slice(0, 20).forEach(function (x) {
-      const n = isObj(x) && nmOk(x.name, 14); if (!n || tierNames.some(function (t) { return t.toLowerCase() === n.toLowerCase(); })) return;
-      const after = tierNames.indexOf(x.after) >= 0 ? x.after : tierNames[tierNames.length - 1];
+      const n = isObj(x) && nmOk(x.name, 14); if (!n || !nameFree(n, tierNames, TIER0)) return;
+      const after = tierNames.indexOf(normT(x.after)) >= 0 ? normT(x.after) : tierNames[tierNames.length - 1];
       tierNames.push(n);
       o.tiers.push({ name: n, color: /^#[0-9a-fA-F]{6}$/.test(x.color) ? x.color : '#ffffff', pts: Math.min(100000, Math.max(1, Math.round(+x.pts) || 1)), weight: Math.min(1000, Math.max(0.01, +x.weight || 1)), after: after });
     });
     // Changes to the built-in rarities and sets
     if (isObj(b.tierEdits)) TIER0.forEach(function (n) {
       const e = b.tierEdits[n]; if (!isObj(e)) return; const r = {};
+      if (tierDisp[n]) r.name = tierDisp[n];
       if (/^#[0-9a-fA-F]{6}$/.test(e.color)) r.color = e.color;
       if (Number.isFinite(+e.pts) && e.pts !== null && e.pts !== '') r.pts = Math.min(100000, Math.max(0, Math.round(+e.pts)));
       if (Number.isFinite(+e.weight) && e.weight !== null && e.weight !== '') r.weight = Math.min(1000, Math.max(0, +e.weight));
@@ -236,18 +257,23 @@ The Big J Monster`;
     });
     if (isObj(b.setEdits)) CAT_BASE.forEach(function (n) {
       const e = b.setEdits[n]; if (!isObj(e)) return; const r = {};
+      if (catDisp[n]) r.name = catDisp[n];
       if (Number.isFinite(+e.hue) && e.hue !== null && e.hue !== '') r.hue = ((Math.round(+e.hue) % 360) + 360) % 360;
       if (typeof e.blurb === 'string') r.blurb = e.blurb.replace(/[\r\n\t]+/g, ' ').trim().slice(0, 90);
       if (Object.keys(r).length) o.setEdits[n] = r;
     });
+    // Order the sets are shown in (names; any set missing from the list follows in its default order).
+    if (Array.isArray(b.setOrder)) b.setOrder.slice(0, 80).forEach(function (x) { const n = normC(String(x)); if (catNames.indexOf(n) >= 0 && o.setOrder.indexOf(n) < 0) o.setOrder.push(n); });
+    o.codesSeeded = !!b.codesSeeded;
+    ['approved', 'revoked'].forEach(function (k) { if (Array.isArray(b[k])) b[k].slice(0, 3000).forEach(function (x) { x = String(x); if (/^d\d{15,19}$/.test(x) && o[k].indexOf(x) < 0) o[k].push(x); }); });
     if (isObj(b.settings) && Number.isFinite(+b.settings.holoMult)) o.settings.holoMult = Math.min(20, Math.max(1, +(+b.settings.holoMult).toFixed(2)));
     // Power hours: a boost that makes cards more likely for a while. kind: 'weight' (how often the card drops) or 'holo' (skibidi chance).
     if (Array.isArray(b.events)) b.events.slice(0, 30).forEach(function (x) {
       if (!isObj(x) || typeof x.id !== 'string' || !/^[a-z0-9]{4,40}$/.test(x.id)) return;
       const scope = ['all', 'rare', 'tier', 'set', 'card'].indexOf(x.scope) >= 0 ? x.scope : 'all', val = String(x.value == null ? '' : x.value).slice(0, 120);
-      if (scope === 'tier' && tierNames.indexOf(val) < 0) return; if (scope === 'set' && catNames.indexOf(val) < 0) return; if (scope === 'card' && !val) return;
+      const val2 = scope === 'tier' ? normT(val) : scope === 'set' ? normC(val) : val; if (scope === 'tier' && tierNames.indexOf(val2) < 0) return; if (scope === 'set' && catNames.indexOf(val2) < 0) return; if (scope === 'card' && !val) return;
       const end = +x.end || 0; if (!(end > 0)) return;
-      o.events.push({ id: x.id, name: String(x.name == null ? '' : x.name).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 40) || 'Power hour', kind: x.kind === 'holo' ? 'holo' : 'weight', scope: scope, value: scope === 'all' || scope === 'rare' ? '' : val,
+      o.events.push({ id: x.id, name: String(x.name == null ? '' : x.name).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 40) || 'Power hour', kind: x.kind === 'holo' ? 'holo' : 'weight', scope: scope, value: scope === 'all' || scope === 'rare' ? '' : val2,
         mult: Math.min(1000, Math.max(0.01, +(+x.mult).toFixed(3) || 2)), start: +x.start || 0, end: end });
     });
     // Pack codes made in the admin panel: a code word that gives packs and/or cards, once per save.
@@ -269,8 +295,8 @@ The Big J Monster`;
     if (isObj(b.edits)) Object.keys(b.edits).slice(0, 1000).forEach(function (k) {
       const e = b.edits[k]; if (!isObj(e)) return; const r = {};
       if (typeof e.name === 'string' && e.name.trim()) r.name = e.name.replace(/[\r\n\t]+/g, ' ').trim().slice(0, 60);
-      if (tierNames.indexOf(e.tier) >= 0) r.tier = e.tier;
-      if (typeof e.cat === 'string' && catNames.indexOf(e.cat) >= 0) r.cat = e.cat;
+      if (tierNames.indexOf(normT(e.tier)) >= 0) r.tier = normT(e.tier);
+      if (typeof e.cat === 'string' && catNames.indexOf(normC(e.cat)) >= 0) r.cat = normC(e.cat);
       if (e.pts !== undefined && e.pts !== null && e.pts !== '' && Number.isFinite(+e.pts)) r.pts = Math.min(1000000, Math.max(0, Math.round(+e.pts)));
       if (e.w !== undefined && e.w !== null && e.w !== '' && Number.isFinite(+e.w)) r.w = Math.min(1000, Math.max(0, +(+e.w).toFixed(4)));
       if (e.holo !== undefined && e.holo !== null && e.holo !== '' && Number.isFinite(+e.holo)) r.holo = Math.min(1, Math.max(0, +(+e.holo).toFixed(4)));
@@ -280,8 +306,8 @@ The Big J Monster`;
     if (Array.isArray(b.added)) b.added.slice(0, 500).forEach(function (a) {
       if (!isObj(a) || typeof a.id !== 'string' || !a.id || a.id.length > 120 || a.id.indexOf('|') >= 0) return;
       const name = String(a.name == null ? '' : a.name).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 60);
-      if (!name || catNames.indexOf(a.cat) < 0 || tierNames.indexOf(a.tier) < 0) return;
-      o.added.push({ id: a.id, name: name, cat: a.cat, tier: a.tier });
+      const ac = normC(a.cat), at = normT(a.tier); if (!name || catNames.indexOf(ac) < 0 || tierNames.indexOf(at) < 0) return;
+      o.added.push({ id: a.id, name: name, cat: ac, tier: at });
     });
     return o;
   }
@@ -290,23 +316,27 @@ The Big J Monster`;
   const slug = function (t) { return String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-'); };
   // Puts the admin's custom sets and rarities into the live TIERS / CATS / weights, in place.
   function rebuildTiers() {
-    Object.keys(CATS).forEach(function (k) { if (CAT_BASE.indexOf(k) < 0) delete CATS[k]; });
-    CAT_BASE.forEach(function (k) { const e = CONFIG.setEdits[k] || {}; CATS[k].hue = e.hue != null ? e.hue : CAT_DEF[k].hue; CATS[k].blurb = e.blurb != null && e.blurb !== '' ? e.blurb : CAT_DEF[k].blurb; });
-    CONFIG.sets.forEach(function (x) { CATS[x.name] = { hue: x.hue, name: x.name, blurb: x.blurb || 'A custom set.', custom: true }; });
+    // Sets: built-in ones (maybe renamed) and custom ones, shown in the admin's chosen order. CATS is refilled in place.
+    const ent = {}, base = [];
+    CAT_BASE.forEach(function (k) { const e = CONFIG.setEdits[k] || {}, nm = e.name || k; ent[nm] = { hue: e.hue != null ? e.hue : CAT_DEF[k].hue, name: nm, blurb: e.blurb != null && e.blurb !== '' ? e.blurb : CAT_DEF[k].blurb, monster: CAT_DEF[k].monster, orig: k }; base.push(nm); });
+    CONFIG.sets.forEach(function (x) { ent[x.name] = { hue: x.hue, name: x.name, blurb: x.blurb || 'A custom set.', custom: true }; base.push(x.name); });
+    Object.keys(CATS).forEach(function (k) { delete CATS[k]; }); Object.keys(CAT_KEY).forEach(function (k) { delete CAT_KEY[k]; });
+    CAT_ORDER = base.slice();
+    CONFIG.setOrder.filter(function (k) { return ent[k]; }).concat(base.filter(function (k) { return CONFIG.setOrder.indexOf(k) < 0; })).forEach(function (k) { CATS[k] = ent[k]; CAT_KEY[k] = ent[k].orig || k; });
     GS.holoMult = CONFIG.settings.holoMult;
-    const L = TIER0.map(function (n, i) { const e = CONFIG.tierEdits[n] || {}; return { name: n, color: e.color || C0[n], pts: e.pts != null ? e.pts : P0[i], w: e.weight != null ? e.weight : W0[i], fx: i, edited: !!CONFIG.tierEdits[n] }; });
+    const L = TIER0.map(function (n, i) { const e = CONFIG.tierEdits[n] || {}; return { name: e.name || n, orig: n, color: e.color || C0[n], pts: e.pts != null ? e.pts : P0[i], w: e.weight != null ? e.weight : W0[i], fx: i, edited: !!CONFIG.tierEdits[n] }; });
     CONFIG.tiers.forEach(function (x) {
       let at = -1; L.forEach(function (t, i) { if (t.name === x.after) at = i; });
       if (at < 0) at = L.length - 1;
       L.splice(at + 1, 0, { name: x.name, color: x.color, pts: x.pts, w: x.weight, fx: L[at].fx + (L[at].fx % 1 ? 0 : 0.5), custom: true });
     });
     TIERS.length = 0; POINTS.length = 0; BASE_WEIGHTS.length = 0; TIER_FX.length = 0;
-    Object.keys(TIER_COLOR).forEach(function (k) { delete TIER_COLOR[k]; });
-    L.forEach(function (t) { TIERS.push(t.name); POINTS.push(t.pts); BASE_WEIGHTS.push(t.w); TIER_FX.push(t.fx); TIER_COLOR[t.name] = t.color; });
+    Object.keys(TIER_COLOR).forEach(function (k) { delete TIER_COLOR[k]; }); Object.keys(TIER_KEY).forEach(function (k) { delete TIER_KEY[k]; });
+    L.forEach(function (t) { TIER_KEY[t.name] = t.orig || t.name; TIERS.push(t.name); POINTS.push(t.pts); BASE_WEIGHTS.push(t.w); TIER_FX.push(t.fx); TIER_COLOR[t.name] = t.color; });
     BYTIER.length = 0; POOL.length = 0; TIERS.forEach(function () { BYTIER.push([]); POOL.push([]); });
     if (typeof document !== 'undefined') {
       let st = document.getElementById('ssg-tiers'); if (!st) { st = document.createElement('style'); st.id = 'ssg-tiers'; document.head.appendChild(st); }
-      st.textContent = ':root{' + L.filter(function (t) { return t.custom || t.color !== C0[t.name]; }).map(function (t) { return '--t-' + slug(t.name) + ':' + t.color + ';'; }).join('') + '}' + L.filter(function (t) { return t.custom; }).map(function (t) {
+      st.textContent = ':root{' + L.filter(function (t) { return t.custom || t.color !== C0[t.orig]; }).map(function (t) { return '--t-' + slug(t.orig || t.name) + ':' + t.color + ';'; }).join('') + '}' + L.filter(function (t) { return t.custom; }).map(function (t) {
         const c = 'var(--t-' + slug(t.name) + ')', k = '.t-' + slug(t.name);
         return k + ' .tier-text,.tier-text' + k + '{color:' + c + '}.card' + k + ',.special' + k + ',.unit' + k + '{--tc:' + c + '}.slot.revealed' + k + ' .flipper{filter:drop-shadow(0 0 20px ' + c + ')}.idx-item' + k + ' .dot{background:' + c + '}.tier-prog>' + k + '{--tc:' + c + '}';
       }).join('');
@@ -315,17 +345,20 @@ The Big J Monster`;
   function rebuild() {
     rebuildTiers();
     const list = [], seen = {};
+    const tierDisp = function (n) { return (CONFIG.tierEdits[n] && CONFIG.tierEdits[n].name) || n; }, catDisp = function (n) { return (CONFIG.setEdits[n] && CONFIG.setEdits[n].name) || n; };
     const extra = function (e) { return { ptsOv: e.pts != null ? e.pts : null, wm: e.w != null ? e.w : 1, holoOv: e.holo != null ? e.holo : null, off: !!e.off, edited: Object.keys(e).length > 0 }; };
-    BASE.forEach(function (b) { const e = CONFIG.edits[b.id] || {}; seen[b.id] = 1; list.push(Object.assign({ id: b.id, name: e.name || b.name, cat: e.cat || b.cat, tier: e.tier || b.tier, custom: false, img: CONFIG_IMAGES[b.id] || IMAGES[b.id] || null, base: b }, extra(e))); });
+    BASE.forEach(function (b) { const e = CONFIG.edits[b.id] || {}; seen[b.id] = 1; list.push(Object.assign({ id: b.id, name: e.name || b.name, cat: e.cat || catDisp(b.cat), tier: e.tier || tierDisp(b.tier), custom: false, img: CONFIG_IMAGES[b.id] || IMAGES[b.id] || null, base: b }, extra(e))); });
     CONFIG.added.forEach(function (a) { if (seen[a.id]) return; seen[a.id] = 1; const e = CONFIG.edits[a.id] || {}; list.push(Object.assign({ id: a.id, name: e.name || a.name, cat: e.cat || a.cat, tier: e.tier || a.tier, custom: true, img: CONFIG_IMAGES[a.id] || null, base: a }, extra(e))); });
     CARDS.length = 0; Object.keys(BYID).forEach(function (k) { delete BYID[k]; });
     MONSTER_POOL.length = 0;
     list.forEach(function (c) {
-      c.ti = TIERS.indexOf(c.tier); c.fx = TIER_FX[c.ti]; c.pts = c.ptsOv != null ? c.ptsOv : POINTS[c.ti]; c.monster = !!CATS[c.cat].monster;
+      c.monster = !!CATS[c.cat].monster;
+      if (c.monster) c.tier = tierDisp('Monster'); // every card in the Monster set is of the Monster rarity
+      c.ti = TIERS.indexOf(c.tier); c.fx = TIER_FX[c.ti]; c.pts = c.ptsOv != null ? c.ptsOv : POINTS[c.ti];
       CARDS.push(c); BYID[c.id] = c; BYTIER[c.ti].push(c); if (!c.off) { if (c.monster) MONSTER_POOL.push(c); else POOL[c.ti].push(c); }
     });
     // Rank 1 = hardest to pull. Ties break by set order, then name.
-    const catOrder = Object.keys(CATS);
+    const catOrder = CAT_ORDER;
     CARDS.slice().sort(function (a, b) { return b.ti - a.ti || catOrder.indexOf(a.cat) - catOrder.indexOf(b.cat) || a.name.localeCompare(b.name); })
       .forEach(function (c, i) { c.rank = i + 1; });
   }
@@ -349,6 +382,7 @@ The Big J Monster`;
   // Pack codes. Players type these into the "Code" box. Each code works once per save, case doesn't matter.
   // packs: free packs added. cards: optional list of card ids to give (e.g. 'SSR:Freddy').
   // Heads up: this file is public on GitHub Pages, so anyone can read the codes. Treat them as fun, not secret.
+  // These two are only used until the admin page copies them into the editable code list (config.codesSeeded), after which they can be deleted there.
   const CODES = {
     SIGMA: { packs: 3, note: 'Sigma grindset' },
     MGJ:   { packs: 10, note: 'The Big three' }
@@ -359,7 +393,7 @@ The Big J Monster`;
   function findCode(raw) {
     const k = String(raw || '').trim().toUpperCase(); if (!k) return null;
     const a = CONFIG.codes.find(function (c) { return c.code === k; }); if (a) return a.off ? null : { code: k, packs: a.packs, cards: a.cards, max: a.max, until: a.until, managed: true };
-    const st = Object.keys(CODES).find(function (x) { return x.toUpperCase() === k; }); return st ? Object.assign({ code: k }, CODES[st]) : null;
+    const st = CONFIG.codesSeeded ? null : Object.keys(CODES).find(function (x) { return x.toUpperCase() === k; }); return st ? Object.assign({ code: k }, CODES[st]) : null;
   }
   // Profile badges, worked out from a player's stats (nothing is stored). rank = leaderboard position by score, if known.
   function badgesOf(cards, opened, rank) {
@@ -375,10 +409,18 @@ The Big J Monster`;
     const live = CARDS.filter(function (c) { return !c.off; }); if (live.length && live.every(function (c) { return cards[c.id] && cards[c.id].n > 0; })) add('🌟', 'Completionist', 'Owns every card in the game');
     return out;
   }
+  // Whitelist. Accounts made before WL_START are let in automatically (they existed when the whitelist was introduced); every account made after it
+  // has to be approved on the admin page. The admin can approve anyone and revoke anyone.
+  const WL_START = 1795236895763;
+  function isApproved(acct) {
+    if (!acct) return false;
+    if (CONFIG.approved.indexOf(acct.k) >= 0) return true;
+    return (+acct.created || 0) < WL_START && CONFIG.revoked.indexOf(acct.k) < 0;
+  }
   function eventsNow(now) { now = now || Date.now(); return CONFIG.events.filter(function (e) { return e.start <= now && e.end > now; }); }
   function evHit(e, c) { return e.scope === 'all' || (e.scope === 'rare' && c.fx >= 2) || (e.scope === 'tier' && c.tier === e.value) || (e.scope === 'set' && c.cat === e.value) || (e.scope === 'card' && c.id === e.value); }
   function eventMult(c, kind, now) { let m = 1; eventsNow(now).forEach(function (e) { if (e.kind === (kind || 'weight') && evHit(e, c)) m *= e.mult; }); return m; }
 
-  window.SSG = { badgesOf: badgesOf, findCode: findCode, GS: GS, TIER_DEF: TIER_DEF, CAT_DEF: CAT_DEF, cardScore: cardScore, scoreOf: scoreOf, eventsNow: eventsNow, eventMult: eventMult, evHit: evHit, applyConfig: applyConfig, cleanConfig: cleanConfig, getConfig: function () { return CONFIG; }, BASE: BASE, TIERS: TIERS, TIER_COLOR: TIER_COLOR, CATS: CATS, CARDS: CARDS, BYID: BYID, BYTIER: BYTIER, POOL: POOL, MONSTER_POOL: MONSTER_POOL, MONSTER_CHANCE: MONSTER_CHANCE,
+  window.SSG = { isApproved: isApproved, WL_START: WL_START, copyValue: copyValue, TIER_KEY: TIER_KEY, CAT_KEY: CAT_KEY, DEFAULT_CODES: CODES, badgesOf: badgesOf, findCode: findCode, GS: GS, TIER_DEF: TIER_DEF, CAT_DEF: CAT_DEF, cardScore: cardScore, scoreOf: scoreOf, eventsNow: eventsNow, eventMult: eventMult, evHit: evHit, applyConfig: applyConfig, cleanConfig: cleanConfig, getConfig: function () { return CONFIG; }, BASE: BASE, TIERS: TIERS, TIER_COLOR: TIER_COLOR, CATS: CATS, CARDS: CARDS, BYID: BYID, BYTIER: BYTIER, POOL: POOL, MONSTER_POOL: MONSTER_POOL, MONSTER_CHANCE: MONSTER_CHANCE,
     BASE_WEIGHTS: BASE_WEIGHTS, TIER_FX: TIER_FX, TIER0: TIER0, CAT_BASE: CAT_BASE, SELL: SELL, POINTS: POINTS, CODES: CODES, DIFFS: DIFFS, hash: hash, rng: rng };
 })();

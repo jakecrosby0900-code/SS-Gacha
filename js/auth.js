@@ -132,10 +132,17 @@
       try { localStorage.removeItem(SESS); } catch (e) { /* ignore */ }
       location.hash = '#home'; ctx.route();
     }
-    // Called after every online sync: if the admin deleted this account, sign out.
+    // Called after every online sync: sign out only if the admin really deleted this account.
+    // GitHub's issue list is sometimes short or lagging (rate limits, paging, a just-made issue), so one sync that does not show the account
+    // proves nothing. It must be missing from several full, complete listings in a row, spread over time, before we believe it.
+    let gone = 0, goneSince = 0;
     function watch() {
       const s = session(); if (!s || net.state.status !== 'ok' || !net.state.loaded || Date.now() - (s.at || 0) < 120000) return;
-      if (!net.state.accounts.some((a) => a.k === s.k && a.pid === s.pid)) { try { localStorage.removeItem(SESS); } catch (e) { /* ignore */ } ctx.toast('Your account was removed.', true); ctx.route(); }
+      if (!net.state.complete || !net.state.accounts.length) return; // partial or empty listing: learn nothing
+      if (net.state.accounts.some((a) => a.k === s.k)) { gone = 0; goneSince = 0; return; } // the account exists (its save id is repaired by the app if it differs)
+      if (!goneSince) goneSince = Date.now(); gone++;
+      if (gone < 4 || Date.now() - goneSince < 180000) return;
+      try { localStorage.removeItem(SESS); } catch (e) { /* ignore */ } ctx.toast('Your account was removed.', true); ctx.route();
     }
 
     // ---------- sign in page ----------

@@ -132,3 +132,30 @@
 .auth .btn.discord:hover:not(:disabled) { background: #4752c4; border-color: #4752c4; }
 .auth .btn.discord:disabled { opacity: .7; cursor: progress; }
 .auth .auth-note { margin: 0; padding: 8px 10px; border-radius: 8px; background: rgba(255, 255, 255, .06); }
+
+/* v27: rank sits under the profile picture instead of over it */
+.pf2-av { display: grid; justify-items: center; gap: 10px; padding-bottom: 0; }
+.pf2-rank { position: static; transform: none; display: inline-flex; align-items: baseline; justify-content: center; gap: 6px; min-width: 0; padding: 4px 12px; border-radius: 999px; background: rgba(255, 255, 255, .06); border: 1px solid var(--line); line-height: 1.1; white-space: nowrap; }
+.pf2-rank b { font: 700 1rem var(--display); color: var(--accent); }
+.pf2-rank small { font: 700 .62rem var(--display); letter-spacing: .12em; color: var(--muted); }
+
+/* v27: Best cards row had room cut off, so a hovered card was clipped. Extra padding gives it room; negative margins keep the layout the same. */
+.best-row { padding: 28px 16px 32px; margin: -20px -16px -22px; }
+
+/* v27: badges are buttons that open a details popup */
+button.bdg { font: inherit; color: inherit; cursor: pointer; width: 100%; transition: transform .15s, border-color .15s, background .15s; }
+button.bdg:hover { transform: translateY(-2px); background: rgba(255, 255, 255, .06); border-color: var(--bc); }
+button.bdg:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.bd-detail { --bc: #6f6a99; display: grid; gap: 12px; }
+.bd-detail.bt1 { --bc: #a5b0bd; } .bd-detail.bt2 { --bc: #4cc38a; } .bd-detail.bt3 { --bc: #4aa3ff; } .bd-detail.bt4 { --bc: #b36bff; } .bd-detail.bt5 { --bc: #ffb02e; }
+.bd-head { display: flex; align-items: center; gap: 14px; padding-right: 30px; } .bd-head h2 { margin: 0; } .bd-head p { margin: 2px 0 0; }
+.bd-detail p { margin: 0; }
+.bd-now { display: grid; gap: 2px; padding: 10px 12px; border-radius: 10px; background: rgba(255, 255, 255, .05); } .bd-now b { font: 700 1.05rem var(--display); }
+.bdg-bar.big { height: 8px; border-radius: 8px; }
+.bd-need { font-weight: 600; }
+.bd-levels { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.bd-levels li { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line); opacity: .6; }
+.bd-levels li b { margin-left: auto; font: 700 .85rem var(--display); }
+.bd-levels li span { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; background: rgba(255, 255, 255, .1); font: 700 .72rem var(--display); }
+.bd-levels li.done { opacity: 1; border-color: color-mix(in srgb, var(--bc) 60%, transparent); } .bd-levels li.done span { background: var(--bc); color: #0b0a14; }
+.bd-levels li.next { opacity: 1; border-style: dashed; border-color: var(--bc); }

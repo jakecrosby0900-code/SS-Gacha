@@ -1,0 +1,91 @@
+/* v29: quiet refreshes, steadier pack opening, card close-up, notifications, friends, comments */
+
+/* ---- no layout jump when the scrollbar appears/disappears (modals, pack opening) ---- */
+html { scrollbar-gutter: stable; scroll-behavior: auto; }
+.opening { scrollbar-gutter: stable both-edges; }
+
+/* ---- background refreshes never replay the entrance animation ---- */
+main.soft > *, main .soft > *, .soft > * { animation: none !important; }
+
+/* ---- pack opening ---- */
+.opening { grid-template-columns: minmax(0, 1fr); }
+.opening > .stage-pack, .opening > .reveal-row { grid-area: 1 / 1; }
+.stage-pack { position: relative; z-index: 1; }
+/* hovering a card while the pack opens must never change its size (cards under a resting pointer used to look bigger than the rest) */
+.opening .card.tilting, .opening .card { --s: 1 !important; }
+.summary-grid .card { animation-fill-mode: backwards; }
+/* the pack no longer falls away: it stays while the cards jump out, then sinks */
+.stage-pack.torn .bag-body { animation: none; }
+.stage-pack.torn.emptying .bag-body { animation: packsink .7s ease-in forwards; }
+.stage-pack.torn.emptying .ppk:not(:last-child) { animation: packfade .5s ease-in forwards; }
+@keyframes packsink { 0% { transform: translateY(0); opacity: 1; } 100% { transform: translateY(46px) scale(.92); opacity: 0; } }
+.pack-rays { position: absolute; left: 50%; top: 14%; width: min(150vmin, 1100px); aspect-ratio: 1; transform: translate(-50%, -50%) scale(.2); pointer-events: none; z-index: 0; opacity: 0;
+  background: repeating-conic-gradient(from 0deg, rgba(255, 238, 180, .7) 0 3deg, transparent 3deg 11deg);
+  -webkit-mask-image: radial-gradient(circle, #000 0, rgba(0, 0, 0, .55) 18%, transparent 62%); mask-image: radial-gradient(circle, #000 0, rgba(0, 0, 0, .55) 18%, transparent 62%);
+  animation: raysburst 1.5s ease-out forwards; }
+@keyframes raysburst { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.2) rotate(0deg); } 25% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(1.15) rotate(22deg); } }
+.reveal-row { width: min(1000px, 100%); min-height: calc(var(--cw, 150px) * 1.4 + 70px); align-content: center; }
+.slot { will-change: transform; align-content: start; }
+.reveal-label { display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 3px; min-height: 4.6em; text-align: center; }
+.reveal-label .new-under { margin: 0; }
+.reveal-row .slot { animation: none; }
+.card-back { box-shadow: 0 0 22px rgba(139, 92, 246, .4), 0 10px 24px rgba(0, 0, 0, .5); }
+@media (prefers-reduced-motion: reduce) { .pack-rays { display: none; } }
+
+/* ---- card close-up ---- */
+.pop-copy { background: none; border: 0; padding: 0; display: grid; justify-items: center; gap: 4px; cursor: zoom-in; font: inherit; color: inherit; }
+.pop-copy:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 10px; }
+.pop-val { font: 600 .72rem var(--display); color: var(--muted); letter-spacing: .03em; }
+.zoomview { position: fixed; inset: 0; z-index: 400; display: grid; place-items: center; align-content: center; gap: 12px; background: rgba(5, 3, 14, .9); backdrop-filter: blur(10px); animation: zoomin .18s ease-out; cursor: zoom-out; padding: 16px; }
+@keyframes zoomin { from { opacity: 0; } }
+.zoom-stage { perspective: 900px; cursor: default; filter: drop-shadow(0 20px 50px rgba(0, 0, 0, .7)); }
+.zoom-stage .card { --cw: 380px; }
+.zoom-cap { margin: 0; text-align: center; display: grid; gap: 2px; font-size: 1.05rem; cursor: default; }
+.zoom-x, .zoom-nav { position: absolute; background: rgba(255, 255, 255, .1); color: #fff; border: 1px solid rgba(255, 255, 255, .2); border-radius: 50%; width: 44px; height: 44px; font-size: 1.3rem; cursor: pointer; display: grid; place-items: center; }
+.zoom-x { top: calc(14px + env(safe-area-inset-top, 0px)); right: 14px; } .zoom-nav { top: 50%; transform: translateY(-50%); font-size: 2rem; line-height: 1; padding-bottom: 4px; }
+.zoom-nav.prev { left: 12px; } .zoom-nav.next { right: 12px; }
+.zoom-x:hover, .zoom-nav:hover { background: rgba(255, 255, 255, .22); }
+
+/* ---- notifications + bell ---- */
+.bell { position: relative; text-decoration: none; display: inline-grid; place-items: center; }
+.bell-n { position: absolute; top: -5px; right: -6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: #ff4d6d; color: #fff; font: 700 .68rem/18px var(--display); text-align: center; box-shadow: 0 0 0 2px var(--bg, #0d0720); }
+.nbadge { background: #ff4d6d; color: #fff; }
+.note-list { display: grid; gap: 8px; margin-top: 12px; }
+.note { display: grid; grid-template-columns: 38px 1fr auto; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; background: rgba(255, 255, 255, .04); border: 1px solid var(--line, rgba(255, 255, 255, .1)); text-decoration: none; color: inherit; }
+.note.unread { background: color-mix(in srgb, var(--accent, #8b5cf6) 14%, transparent); border-color: color-mix(in srgb, var(--accent, #8b5cf6) 55%, transparent); }
+.note:hover { background: rgba(255, 255, 255, .08); }
+.note-ic { font-size: 1.4rem; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 50%; background: rgba(255, 255, 255, .06); }
+.note-txt { min-width: 0; overflow-wrap: anywhere; } .note-txt small { display: block; color: var(--muted); }
+.note-x { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 1rem; padding: 6px; border-radius: 8px; } .note-x:hover { background: rgba(255, 255, 255, .1); color: #fff; }
+
+/* ---- friends + chat ---- */
+.fr-grid { display: grid; gap: 10px; margin: 10px 0 18px; }
+.fr-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 14px; background: rgba(255, 255, 255, .04); border: 1px solid var(--line, rgba(255, 255, 255, .1)); }
+.fr-row .fr-name { min-width: 0; display: grid; } .fr-row .fr-name a { color: inherit; text-decoration: none; font-weight: 600; overflow-wrap: anywhere; }
+.fr-btns { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.fr-unread { display: inline-block; min-width: 18px; padding: 0 6px; border-radius: 999px; background: #ff4d6d; color: #fff; font: 700 .7rem/18px var(--display); text-align: center; margin-left: 6px; }
+.fr-find { display: grid; gap: 8px; }
+.chat { display: grid; grid-template-rows: auto 1fr auto; gap: 10px; height: min(70vh, 640px); }
+.chat-head { display: flex; align-items: center; gap: 12px; }
+.chat-log { overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 14px; background: rgba(0, 0, 0, .25); border: 1px solid var(--line, rgba(255, 255, 255, .1)); overscroll-behavior: contain; }
+.msg { max-width: min(78%, 460px); padding: 8px 12px; border-radius: 14px; background: rgba(255, 255, 255, .08); align-self: flex-start; overflow-wrap: anywhere; white-space: pre-wrap; }
+.msg.mine { align-self: flex-end; background: color-mix(in srgb, var(--accent, #8b5cf6) 55%, #0d0720); }
+.msg small { display: block; opacity: .6; font-size: .68rem; margin-top: 2px; }
+.chat-send { display: flex; gap: 8px; } .chat-send input { flex: 1; min-width: 0; }
+
+/* ---- board comments ---- */
+.cm-toggle { margin-left: auto; }
+.cm-box { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line, rgba(255, 255, 255, .1)); display: grid; gap: 8px; }
+.cm { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: start; }
+.cm-body { min-width: 0; overflow-wrap: anywhere; } .cm-body small { color: var(--muted); margin-left: 6px; } .cm-body a { color: inherit; font-weight: 600; text-decoration: none; }
+.cm-send { display: flex; gap: 8px; } .cm-send input { flex: 1; min-width: 0; }
+.cm-x { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 2px 6px; border-radius: 6px; } .cm-x:hover { color: #ff7a90; background: rgba(255, 255, 255, .08); }
+
+/* ---- admin: drag to reorder sets ---- */
+.ad-row.drag-row { cursor: default; touch-action: pan-y; }
+.drag-h { cursor: grab; touch-action: none; user-select: none; padding: 6px 8px; margin-left: -6px; color: var(--muted); font-size: 1.1rem; line-height: 1; border-radius: 8px; }
+.drag-h:hover { background: rgba(255, 255, 255, .08); color: #fff; } .drag-h:active { cursor: grabbing; }
+.ad-row.dragging { opacity: .55; outline: 2px dashed var(--accent, #8b5cf6); }
+.ad-row.drop-before { box-shadow: 0 -3px 0 0 var(--accent, #8b5cf6); } .ad-row.drop-after { box-shadow: 0 3px 0 0 var(--accent, #8b5cf6); }
+@media (max-width: 520px) { .fr-row { grid-template-columns: auto 1fr; } .fr-btns { grid-column: 1 / -1; justify-content: flex-start; } .note { grid-template-columns: 34px 1fr auto; } }
+.zoomview .card, .zoomview .card.tilting { --s: 1 !important; }

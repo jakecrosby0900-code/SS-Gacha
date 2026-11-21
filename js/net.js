@@ -13,7 +13,7 @@
     const G = ctx.G, BYID = G.BYID, CARDS = G.CARDS, esc = ctx.esc, $ = ctx.$, $$ = ctx.$$;
     const S = () => ctx.S();
     const LS = 'ss-gacha-net', EVERY = 60000, ONLINE_MS = 150000, BEAT_MS = 240000, MAX_BODY = 64000;
-    const net = { dir: [], trades: [], accounts: [], grants: [], redeems: [], board: [], cfg: G.cleanConfig(null), cfgNum: 0, imgNum: {}, cfgKey: '', status: 'off', msg: '', last: 0, busy: false, lastKey: '', lastBeat: 0, createdAt: 0, loaded: false, cfgChanged: false };
+    const net = { dir: [], trades: [], accounts: [], grants: [], redeems: [], board: [], cfg: G.cleanConfig(null), cfgNum: 0, imgNum: {}, cfgKey: '', status: 'off', msg: '', last: 0, busy: false, lastKey: '', lastBeat: 0, createdAt: 0, loaded: false, cfgChanged: false, friends: [], complete: false, sig: '', imgreqs: [] };
     const BOARD_MS = 7 * 86400000, BOARD_MAX = 3, BOARD_CARDS = 8;
     const CFG_CACHE = 'ss-gacha-cfg';
     const view = { by: 'score', q: '' };
@@ -73,7 +73,7 @@
     function cleanTrade(b, num) {
       const tid = idOk(b.id), f = b.from || {}, t = b.to || {};
       if (!tid || !idOk(f.id) || !idOk(t.id)) return null;
-      return { id: tid, num: num, from: { id: f.id, name: nm(f.name) }, to: { id: t.id, name: nm(t.name) }, give: items(b.give), want: items(b.want), msg: String(b.msg == null ? '' : b.msg).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 140), at: +b.at || 0,
+      return { id: tid, num: num, from: { id: f.id, name: nm(f.name) }, to: { id: t.id, name: nm(t.name) }, give: items(b.give), want: items(b.want), msg: String(b.msg == null ? '' : b.msg).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 140), at: +b.at || 0, re: idOk(b.re) || '',
         status: ['open', 'accepted', 'declined', 'cancelled'].indexOf(b.status) >= 0 ? b.status : 'open' };
     }
     // ---------- admin config (card edits, new cards, removed players) ----------
@@ -87,19 +87,21 @@
       try { const j = JSON.parse(localStorage.getItem(CFG_CACHE) || 'null'); if (j && j.cfg) { const imgs = {}; Object.keys(j.imgs || {}).forEach((k) => { const v = okImg(j.imgs[k]); if (v) imgs[k] = v; }); applyCfg(j.cfg, imgs); net.cfgChanged = false; } } catch (e) { /* ignore */ }
     }
     function cacheCfg(imgs) {
-      try { localStorage.setItem(CFG_CACHE, JSON.stringify({ cfg: net.cfg, imgs: imgs })); }
+      let keep = imgs; try { if (JSON.stringify(imgs).length > 1200000) keep = {}; } catch (e) { keep = {}; } // big picture caches could fill the browser's storage and stop the save from being written
+      try { localStorage.setItem(CFG_CACHE, JSON.stringify({ cfg: net.cfg, imgs: keep })); }
       catch (e) { try { localStorage.setItem(CFG_CACHE, JSON.stringify({ cfg: net.cfg, imgs: {} })); } catch (e2) { /* ignore */ } }
     }
     async function refresh() {
-      const c = conf(); let all = [];
-      for (let page = 1; page <= 20; page++) {
+      const c = conf(); let all = [], done = false;
+      for (let page = 1; page <= 30; page++) {
         const r = await gh('GET', `/repos/${c.repo}/issues?state=open&per_page=100&page=${page}`);
-        all = all.concat(r.filter((i) => !i.pull_request)); if (r.length < 100) break;
+        all = all.concat(r.filter((i) => !i.pull_request)); if (r.length < 100) { done = true; break; }
       }
+      net.complete = done; // false = there are more open issues than we read; absent things must then NOT be taken to mean "deleted"
       const parsed = [];
       all.forEach((i) => { let b; try { b = JSON.parse(i.body); } catch (e) { return; } if (b && typeof b === 'object') parsed.push({ i: i, b: b }); });
       // 1) admin config, card pictures and accounts first, so custom cards exist before players are read
-      let cfgIssue = null; const imgs = {}, imgNum = {}, accounts = {}, grants = [], redeems = [], seenRd = {}, board = [];
+      let cfgIssue = null; const imgs = {}, imgNum = {}, accounts = {}, grants = [], redeems = [], seenRd = {}, board = [], friends = [], imgreqs = [];
       parsed.forEach((x) => {
         const b = x.b, num = x.i.number;
         if (b.t === 'config') { if (!cfgIssue || num < cfgIssue.num) cfgIssue = { num: num, b: b }; }
@@ -109,7 +111,9 @@
           const tk = Array.isArray(b.take) ? b.take.slice(0, 120).map((x) => ({ id: String(x && x.id), h: x && x.h ? 1 : 0, n: Math.min(9999, Math.max(1, +(x && x.n) | 0 || 1)) })).filter((x) => BYID[x.id]) : [];
           grants.push({ gid: b.gid, k: b.k.toLowerCase(), num: num, cards: cs, take: tk, wipe: !!b.wipe, opened: b.opened == null || !Number.isFinite(+b.opened) ? null : Math.min(1000000, Math.max(0, Math.floor(+b.opened))), packs: Math.min(1000, Math.max(0, +b.packs | 0)), at: +b.at || 0 });
         }
-        else if (b.t === 'board' && idOk(b.pid)) { const ok = (a) => (Array.isArray(a) ? a.filter((x) => typeof x === 'string' && BYID[x.replace(/\|[01]$/, '')]).map((x) => (/\|0$/.test(x) ? x.slice(0, -2) : x)).slice(0, BOARD_CARDS) : []), want = ok(b.want), offer = ok(b.offer); if ((want.length || offer.length) && Date.now() - (+b.at || 0) < BOARD_MS) board.push({ num: num, id: String(b.id || num).slice(0, 24), pid: b.pid, name: nm(b.name), want: want, offer: offer, note: String(b.note || '').replace(/[\r\n\t]+/g, ' ').slice(0, 100), at: +b.at || 0 }); }
+        else if (b.t === 'board' && idOk(b.pid)) { const ok = (a) => (Array.isArray(a) ? a.filter((x) => typeof x === 'string' && BYID[x.replace(/\|[01]$/, '')]).map((x) => (/\|0$/.test(x) ? x.slice(0, -2) : x)).slice(0, BOARD_CARDS) : []), want = ok(b.want), offer = ok(b.offer); if ((want.length || offer.length) && Date.now() - (+b.at || 0) < BOARD_MS) board.push({ num: num, id: String(b.id || num).slice(0, 24), pid: b.pid, name: nm(b.name), want: want, offer: offer, note: String(b.note || '').replace(/[\r\n\t]+/g, ' ').slice(0, 100), at: +b.at || 0, ccount: +x.i.comments || 0 }); }
+        else if (b.t === 'imgreq' && idOk(b.id) && idOk(b.pid) && typeof b.card === 'string') { imgreqs.push({ id: b.id, num: num, card: b.card.slice(0, 120), pid: b.pid, name: nm(b.name), img: okImg(b.img), note: String(b.note || '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 120), at: +b.at || 0, status: ['pending', 'approved', 'rejected'].indexOf(b.status) >= 0 ? b.status : 'pending' }); }
+        else if (b.t === 'friend' && idOk(b.id) && b.from && b.to && idOk(b.from.id) && idOk(b.to.id)) { friends.push({ fid: b.id, num: num, from: { id: b.from.id, name: nm(b.from.name) }, to: { id: b.to.id, name: nm(b.to.name) }, status: ['pending', 'accepted', 'declined'].indexOf(b.status) >= 0 ? b.status : 'pending', at: +b.at || 0, ccount: +x.i.comments || 0 }); }
         else if (b.t === 'redeem' && typeof b.code === 'string' && idOk(b.pid)) { const k = b.pid + '|' + b.code; if (!seenRd[k]) { seenRd[k] = 1; redeems.push({ code: b.code.toUpperCase().slice(0, 24), pid: b.pid, name: nm(b.name), at: +b.at || 0 }); } }
         else if (b.t === 'account' && b.v === 2 && typeof b.did === 'string' && /^\d{15,19}$/.test(b.did) && idOk(b.pid)) {
           // Discord accounts only. Old username/password accounts (no "did") are ignored, so they never count as accounts or reach the leaderboard.
@@ -131,6 +135,10 @@
         else if (b.t === 'trade') { const t = cleanTrade(b, num); if (t && !blocked[t.from.id] && !blocked[t.to.id]) trades.push(t); }
       });
       net.dir = Object.keys(players).map((k) => { const p = players[k]; p.acct = byPid[p.id] ? byPid[p.id].u : null; return p; }); net.trades = trades; net.last = Date.now(); net.loaded = true;
+      net.imgreqs = imgreqs.filter((r) => !blocked[r.pid]);
+      net.friends = friends.filter((f) => !blocked[f.from.id] && !blocked[f.to.id]);
+      // fingerprint of everything a page might show (not the "last seen" clock), so quiet redraws only happen when something really changed
+      net.sig = net.dir.map((p) => p.id + ':' + p.mod + ':' + p.score + ':' + p.opened).join(',') + '|' + trades.map((t) => t.id + t.status).join(',') + '|' + net.board.map((b) => b.num + ':' + b.ccount).join(',') + '|' + net.friends.map((f) => f.fid + f.status + f.ccount).join(',');
     }
     // Admin writes. Re-reads the config issue first so two edits do not overwrite each other.
     async function updateConfig(fn, note) {
@@ -138,7 +146,7 @@
       if (net.cfgNum) { try { const cur = await gh('GET', `/repos/${c.repo}/issues/${net.cfgNum}`); cfg = G.cleanConfig(JSON.parse(cur.body)); } catch (e) { if (e.status && e.status !== 404 && e.status !== 410) throw e; } }
       try { localStorage.setItem('ss-gacha-cfg-undo', JSON.stringify(cfg)); } catch (e) { /* ignore */ } // what "Undo last change" goes back to
       const before = JSON.parse(JSON.stringify(cfg)); fn(cfg); cfg = G.cleanConfig(cfg);
-      const NAMES = { edits: 'card edits', added: 'custom cards', tiers: 'custom rarities', sets: 'custom sets', tierEdits: 'rarity edits', setEdits: 'set edits', events: 'power hours', codes: 'codes', announce: 'announcements', blocked: 'leaderboard removals', settings: 'settings' };
+      const NAMES = { approved: 'approvals', revoked: 'approvals', setOrder: 'set order', edits: 'card edits', added: 'custom cards', tiers: 'custom rarities', sets: 'custom sets', tierEdits: 'rarity edits', setEdits: 'set edits', events: 'power hours', codes: 'codes', announce: 'announcements', blocked: 'leaderboard removals', settings: 'settings' };
       const changed = Object.keys(NAMES).filter((k) => JSON.stringify(before[k]) !== JSON.stringify(cfg[k])).map((k) => NAMES[k]);
       if (note || changed.length) cfg.log = [{ at: Date.now(), text: note || 'Changed ' + changed.join(', ') }].concat(cfg.log || []).slice(0, 100);
       const body = JSON.stringify(Object.assign({ t: 'config', v: 1 }, cfg));
@@ -182,7 +190,7 @@
       Object.keys(s.cards).forEach((id) => { const e = s.cards[id]; if (BYID[id] && e.n > 0) cards[id] = [e.n, e.h || 0, e.f ? 1 : 0, e.t || 0, e.l || 0]; });
       const ws = weekStart(Date.now()); if (!s.wk || s.wk.t < ws) s.wk = { t: ws, s: G.scoreOf(s.cards) };
       return { t: 'player', v: 1, id: p.id, name: p.name, bio: p.bio || '', hue: p.hue, pfp: p.pfp, banner: p.banner, joined: p.joined, seen: Date.now(), opened: s.stats.opened, pulls: s.stats.pulls, cards: cards, wish: Object.keys(s.wish || {}).filter((x) => BYID[x]).slice(0, 300), wk: s.wk, show: s.showcase || [],
-        save: { wish: s.wish || {}, wk: s.wk, showcase: s.showcase || [], mod: s.mod || 0, granted: s.granted, packs: s.packs, bonus: s.bonus || 0, last: s.last, sinceRare: s.sinceRare, started: s.started, stats: s.stats, codes: s.codes, net: s.net } };
+        save: { wish: s.wish || {}, wk: s.wk, showcase: s.showcase || [], mod: s.mod || 0, granted: s.granted, packs: s.packs, bonus: s.bonus || 0, last: s.last, sinceRare: s.sinceRare, started: s.started, stats: s.stats, codes: s.codes, net: s.net, social: s.social } };
     }
     // Uploads this device's save to the account's player issue. s.syncMod remembers which version the cloud holds, so a stale device can tell it must merge first.
     async function publish(force, keep) {
@@ -194,6 +202,7 @@
       if (body.length > MAX_BODY) { delete snap.banner; body = JSON.stringify(snap); }
       if (body.length > MAX_BODY) { delete snap.pfp; body = JSON.stringify(snap); }
       if (body.length > MAX_BODY) { snap.save.net = { out: s.net.out, done: {}, q: s.net.q, hist: [], miss: s.net.miss }; body = JSON.stringify(snap); }
+      if (body.length > MAX_BODY) { snap.save.social = { notes: [], nseen: {}, seen: s.social.seen, badges: s.social.badges }; body = JSON.stringify(snap); }
       const title = `player:${s.profile.id} ${s.profile.name}`.replace(/[\r\n]+/g, ' ');
       if (mine) await gh('PATCH', `/repos/${c.repo}/issues/${mine.num}`, { title: title, body: body }, keep);
       else if (Date.now() - net.createdAt > 120000) {
@@ -244,7 +253,9 @@
       // k '*' = a gift for everyone (only accounts that existed when it was sent, for 14 days).
       net.grants.filter((g) => g.k === s.account || (g.k === '*' && mine && mine.created <= g.at && Date.now() - g.at < 1209600000)).forEach((g) => {
         if (s.granted[g.gid]) return;
-        g.cards.forEach((it) => { for (let i = 0; i < it.n; i++) ctx.addCopy(it.id, it.h); });
+        const held = g.cards.filter((it) => BYID[it.id].monster && !s.settings.monster);
+        g.cards.forEach((it) => { if (BYID[it.id].monster && !s.settings.monster) return; for (let i = 0; i < it.n; i++) ctx.addCopy(it.id, it.h); }); // Monster cards only arrive while the monster is let in
+        if (held.length) hist('Monster card(s) from the admin were held back because the monster is not let in: ' + held.map((it) => BYID[it.id].name).join(', ') + '.');
         if (g.packs) s.bonus = (s.bonus || 0) + g.packs;
         if (g.wipe) { Object.keys(s.cards).forEach((id) => { delete s.cards[id]; }); hist('The admin removed all your cards.'); }
         else if (g.take.length) { g.take.forEach((it) => { for (let i = 0; i < it.n; i++) { if (!ctx.takeCopy(it.id, it.h)) break; } }); hist('The admin removed: ' + g.take.map((it) => BYID[it.id].name + (it.h ? ' (skibidi)' : '') + (it.n > 1 ? ' x' + it.n : '')).join(', ') + '.'); }
@@ -254,7 +265,7 @@
         if (!g.wipe && !g.take.length && (g.cards.length || g.packs)) hist('The admin gave you: ' + (parts.join(', ') || 'a gift') + '.');
       });
       const ks = Object.keys(s.granted); if (ks.length > 300) ks.sort((a, b) => s.granted[a] - s.granted[b]).slice(0, ks.length - 300).forEach((k) => delete s.granted[k]);
-      if (any) { ctx.save(); toast('The admin changed your collection.'); }
+      if (any) { ctx.save(); toast('The admin changed your collection.'); ctx.notify('gift:' + Date.now().toString(36), 'gift', (s.net.hist[0] && s.net.hist[0].text) || 'The admin changed your collection.', '#collection'); }
       return any;
     }
     async function closeGrants() {
@@ -272,7 +283,7 @@
     // The tab is closing or going to the background: push anything not yet uploaded.
     function flush() {
       try {
-        const s = S(); if (!enabled() || !ctx.loggedIn() || ctx.busy() || (s.mod || 0) <= (s.syncMod || 0)) return;
+        const s = S(); if (!enabled() || !ctx.loggedIn() || !ctx.allowed() || ctx.busy() || (s.mod || 0) <= (s.syncMod || 0)) return;
         const mine = net.dir.find(isMe); if (!mine) return;
         publish(true, true).catch(() => {});
       } catch (e) { /* ignore */ }
@@ -293,6 +304,7 @@
       if (kind === 'accepted') { o.want.forEach((it) => ctx.addCopy(it.id, it.h)); hist(`${o.toName} accepted your trade. You got ${o.want.length ? names(o.want) : 'nothing (a gift)'}.`); }
       else { o.give.forEach((it) => ctx.addCopy(it.id, it.h)); hist(`Your trade with ${o.toName} was ${kind}. Your cards came back.`); }
       logTrade('to', o.toName, o.give.length, o.want.length, kind === 'accepted' ? 'accepted' : kind === 'declined' ? 'denied' : kind === 'cancelled' ? 'cancelled' : 'invalid');
+      ctx.notify('tr-res:' + tid, kind === 'accepted' ? 'trade-ok' : 'trade-no', kind === 'accepted' ? `${o.toName} accepted your trade${o.want.length ? ' and you got ' + names(o.want) : ' (your gift)'}.` : kind === 'declined' ? `${o.toName} declined your trade. Your cards came back.` : `Your trade with ${o.toName} was ${kind}. Your cards came back.`, '#trades');
       s.net.q.push({ num: o.num, tid: tid, set: { ack: 1 }, close: true });
       delete s.net.out[tid]; delete s.net.miss[tid]; s.net.done[tid] = 1; prune();
     }
@@ -317,7 +329,7 @@
       }
       if (wrote) ctx.save();
     }
-    async function createTrade(toId, give, want, msg) {
+    async function createTrade(toId, give, want, msg, re) {
       const s = S(), c = conf(), to = net.dir.find((p) => p.id === toId);
       if (!to) throw new Error('Player not found');
       if (!give.length && !want.length) throw new Error('Pick at least one card');
@@ -327,6 +339,7 @@
       msg = String(msg || '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 140);
       s.net.out[tid] = { to: toId, toName: to.name, give: give, want: want, msg: msg, at: Date.now(), num: 0 }; ctx.save();
       const body = { t: 'trade', id: tid, from: { id: s.profile.id, name: s.profile.name }, to: { id: to.id, name: to.name }, give: give, want: want, msg: msg, status: 'open', at: Date.now() };
+      if (re) body.re = re;
       const issue = { title: `trade:${tid} ${s.profile.name} → ${to.name}`.replace(/[\r\n]+/g, ' '), body: JSON.stringify(body) };
       try {
         const r = await gh('POST', `/repos/${c.repo}/issues`, issue);
@@ -370,7 +383,7 @@
         if (!enabled()) { await fallback(); net.status = 'off'; net.msg = ''; }
         else {
           await refresh(); changedFlag = settle(); if (changedFlag) ctx.save();
-          await flushQ(); if (ctx.loggedIn()) { if (reconcile()) changedFlag = true; if (applyGrants()) changedFlag = true; await publish(force); closeGrants(); }
+          await flushQ(); if (ctx.loggedIn() && ctx.allowed()) { if (reconcile()) changedFlag = true; if (applyGrants()) changedFlag = true; await publish(force); closeGrants(); }
           net.status = 'ok'; net.msg = '';
         }
       } catch (e) { net.status = 'err'; net.msg = e.message || 'Sync failed'; if (ctx.loggedIn() && Date.now() - lastWarn > 30000) { lastWarn = Date.now(); toast('Could not save to your account: ' + net.msg, true); } }
@@ -386,16 +399,21 @@
     function paint() {
       const d = $('[data-netdot]'); if (d) { d.className = 'netdot ' + net.status; d.title = statusText(); }
       const n = incoming().length; $$('[data-tradebadge]').forEach((b) => { b.hidden = !n; b.textContent = n; });
+      if (ctx.social) { const u = ctx.social.unread(), fr = ctx.social.friendAlerts(); $$('[data-notebadge]').forEach((b) => { b.hidden = !u; b.textContent = u > 99 ? '99+' : u; }); $$('[data-friendbadge]').forEach((b) => { b.hidden = !fr; b.textContent = fr; }); }
       const st = $('#plstatus'); if (st) st.textContent = statusText();
       const ss = $('#netstatus'); if (ss) ss.textContent = statusText();
     }
+    let lastSig = '';
     function repaint(changed) {
       if ($('.modal-bg') || ctx.busy() || !ctx.loggedIn()) return;
-      const h = location.hash.slice(1) || 'home';
-      if (h === 'leaderboard' || h === 'players') drawPlayers(); else if (h === 'trades') drawTrades(); else if (h.indexOf('user-') === 0 || h === 'profile') ctx.route();
-      else if (h === 'trade' || h === 'post') { /* never redraw a half-filled trade or post under the player's hands */ }
-      else if (h === 'home') { if (changed) ctx.route(); else if (ctx.refreshFeeds) ctx.refreshFeeds(); }
-      else if (changed && h !== 'options' && h !== 'admin') ctx.route();
+      const h = location.hash.slice(1) || 'home', moved = net.sig !== lastSig; lastSig = net.sig;
+      if (h === 'leaderboard' || h === 'players') drawPlayers(); else if (h === 'trades') drawTrades();
+      else if (h.indexOf('user-') === 0 || h === 'profile') { if (moved || changed) ctx.route(true); }
+      else if (h === 'trade' || h === 'post' || h.indexOf('chat-') === 0) { /* never redraw a half-filled trade, post or open conversation under the player's hands */ }
+      else if (h === 'home') { if (changed) ctx.route(true); else if (ctx.refreshFeeds) ctx.refreshFeeds(); }
+      else if (h === 'board') { if ((moved || changed) && !$('.cm-box:not([hidden])') && !$('.cm-send input:focus')) ctx.route(true); }
+      else if (h === 'friends' || h === 'notifications') { if (ctx.social && (moved || changed || ctx.social.dirty())) ctx.route(true); }
+      else if (changed && h !== 'options' && h !== 'admin') ctx.route(true);
     }
 
     // ---------- pages ----------
@@ -411,7 +429,8 @@
       return out.sort((a, b) => b.at - a.at).slice(0, limit || 12);
     }
     const TABS = [['score', 'Most points'], ['unique', 'Most unique cards'], ['opened', 'Most packs opened'], ['week', 'This week']];
-    const shown = () => net.dir.filter((p) => p.acct || !net.loaded || !enabled());
+    const shown = () => net.dir.filter((p) => (p.acct || !net.loaded || !enabled()) && (!p.acct || !net.loaded || approvedPid(p.id)));
+    const approvedPid = (pid) => { const a = net.accounts.find((x) => x.pid === pid); return !a || G.isApproved(a); }; // players whose account is still waiting for approval are not listed
     const rankOf = (p) => { const l = shown().slice().sort((a, b) => b.score - a.score || a.name.localeCompare(b.name)); return l.findIndex((x) => x.id === p.id) + 1; };
     const leftText = (ms) => { const m = Math.max(1, Math.ceil(ms / 60000)), d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60); return d ? d + 'd ' + h + 'h' : h ? h + 'h ' + (m % 60) + 'm' : m + 'm'; };
     function pagePlayers() {
@@ -432,17 +451,17 @@
       let list = shown().filter((p) => !q || p.name.toLowerCase().includes(q) || (p.acct || '').toLowerCase().includes(q));
       list = list.slice().sort((a, b) => (b[key] - a[key]) || (b.score - a.score) || a.name.localeCompare(b.name));
       const medal = ['🥇', '🥈', '🥉'], big = (p) => key === 'week' ? '+' + ctx.fmt(p.week) : ctx.fmt(p[key]), unit = { score: 'pts', unique: 'cards', opened: 'packs', week: 'pts this week' }[key];
-      box.innerHTML = list.length ? `<div class="pl-list">${list.map((p, i) => `<a class="pl-row ${isMe(p) ? 'me' : ''}" href="#user-${p.id}"><span class="pl-rank">${!q && i < 3 && (key !== 'week' || p.week > 0) ? medal[i] : i + 1}</span>${ctx.avatarHTML(42, p)}
+      ctx.setHTML(box, list.length ? `<div class="pl-list">${list.map((p, i) => `<a class="pl-row ${isMe(p) ? 'me' : ''}" href="#user-${p.id}"><span class="pl-rank">${!q && i < 3 && (key !== 'week' || p.week > 0) ? medal[i] : i + 1}</span>${ctx.avatarHTML(42, p)}
           <span class="pl-name"><span class="pl-top"><b>${esc(p.name)}</b>${p.acct && p.acct.toLowerCase() !== p.name.toLowerCase() ? ` <small class="muted">@${esc(p.acct)}</small>` : ''}${isMe(p) ? ' <small class="muted">(you)</small>' : ''}${online(p) ? ' <span class="online-dot" title="Online now"></span>' : ''}<span class="pl-badges">${G.badgesOf(p.cards, p.opened, rk[p.id]).slice(0, 4).map((b) => `<span title="${esc(b.name)}">${b.ic}</span>`).join('')}</span></span><small class="muted">${p.unique}/${CARDS.length} cards · ${p.opened} packs<span class="hide-sm"> · ${p.skibidi} skibidi · ${ctx.fmt(p.score)} pts</span></small></span>
           <span class="pl-score"><b>${big(p)}</b><small>${unit}</small></span></a>`).join('')}</div>`
-        : `<div class="empty"><h2>${net.loaded ? 'No players found' : 'Loading...'}</h2><p class="muted">${net.loaded && !q ? 'Nobody has published a profile yet.' : ''}</p></div>`;
+        : `<div class="empty"><h2>${net.loaded ? 'No players found' : 'Loading...'}</h2><p class="muted">${net.loaded && !q ? 'Nobody has published a profile yet.' : ''}</p></div>`);
     }
     function pageUser(id) {
       const p = net.dir.find((x) => x.id === id);
       if (!p) { $('#main').innerHTML = `<div class="empty"><h2>${net.loaded ? 'Player not found' : 'Loading...'}</h2><p><a class="btn" href="#leaderboard">← Leaderboard</a></p></div>`; if (!net.loaded || Date.now() - net.last > 20000) cycle(); return; }
       if (isMe(p)) { location.replace('#profile'); return; }
       const can = enabled() && p.full;
-      const actions = `<a class="btn" href="#leaderboard">← Leaderboard</a>${can ? `<button class="btn primary" data-net="trade" data-id="${p.id}">⇄ Trade with ${esc(p.name)}</button><button class="btn" data-net="gift" data-id="${p.id}">🎁 Gift a card</button>` : ''}`;
+      const actions = `<a class="btn" href="#leaderboard">← Leaderboard</a>${can ? `<button class="btn primary" data-net="trade" data-id="${p.id}">⇄ Trade with ${esc(p.name)}</button><button class="btn" data-net="gift" data-id="${p.id}">🎁 Gift a card</button>` : ''}${ctx.social ? ctx.social.friendButton(p) : ''}`;
       const mine = S(), want = (p.wish || []).filter((id) => !(p.cards[id] && p.cards[id].n > 0)), theyHave = Object.keys(mine.wish || {}).filter((id) => p.cards[id] && p.cards[id].n > 0 && BYID[id]), iHave = want.filter((id) => mine.cards[id] && mine.cards[id].n > 0);
       const thumbs = (ids) => `<div class="card-row">${ids.slice(0, 24).map((id) => `<button class="card-btn" data-act="card" data-id="${id}">${ctx.cardHTML(BYID[id], { ghost: !mine.cards[id] })}</button>`).join('')}</div>`;
       const matches = p.full && (theyHave.length || iHave.length) ? `<section class="panel match"><h2>Trade matches</h2>${theyHave.length ? `<h3>${esc(p.name)} has ${theyHave.length} card${theyHave.length === 1 ? '' : 's'} on your wishlist</h3>${thumbs(theyHave)}` : ''}${iHave.length ? `<h3>You have ${iHave.length} card${iHave.length === 1 ? '' : 's'} on ${esc(p.name)}'s wishlist</h3>${thumbs(iHave)}` : ''}</section>` : '';
@@ -459,15 +478,15 @@
       const box = $('#trlist'); if (!box) return;
       if (!enabled()) { box.innerHTML = '<div class="panel"><h2>Trading needs GitHub</h2><p class="muted">Add a GitHub token in <a href="#options">Settings</a> (or ask whoever runs this site for the shared one) to trade with other players.</p></div>'; return; }
       const s = S(), inc = incoming(), out = outgoing();
-      box.innerHTML = `<section><h2>Offers for you <span class="muted small">${inc.length}</span></h2>${inc.length ? inc.map((t) => {
+      ctx.setHTML(box, `<section><h2>Offers for you <span class="muted small">${inc.length}</span></h2>${inc.length ? inc.map((t) => {
           const ok = t.want.every((it) => ctx.hasCopy(it.id, it.h)), val = (l) => l.reduce((a, it) => a + BYID[it.id].pts * (it.h ? G.GS.holoMult : 1), 0), gv = val(t.give), wv = val(t.want), bad = t.want.length && wv >= 1.5 * gv && wv - gv >= 50;
-          return `<div class="panel tr-offer"><div class="tr-head"><b>${esc(t.from.name)}</b> <span class="muted">offers</span></div>${t.msg ? `<p class="tr-msg">“${esc(t.msg)}”</p>` : ''}${mini(t.give)}<div class="tr-head"><span class="muted">${t.want.length ? 'and wants' : 'as a gift'}</span></div>${t.want.length ? mini(t.want) : ''}
+          return `<div class="panel tr-offer"><div class="tr-head"><b>${esc(t.from.name)}</b> <span class="muted">${t.re ? 'sent a counter-offer:' : 'offers'}</span></div>${t.msg ? `<p class="tr-msg">“${esc(t.msg)}”</p>` : ''}${mini(t.give)}<div class="tr-head"><span class="muted">${t.want.length ? 'and wants' : 'as a gift'}</span></div>${t.want.length ? mini(t.want) : ''}
             ${t.want.length ? `<p class="tr-val ${bad ? 'warn' : ''}">You would get <b>${ctx.fmt(gv)}</b> pts and give <b>${ctx.fmt(wv)}</b> pts${bad ? ' · ⚠ this offer takes much more than it gives. Think before accepting, or counter it.' : ''}</p>` : ''}
             <div class="row wrap"><button class="btn primary" data-net="accept" data-id="${t.id}" ${ok ? '' : 'disabled'}>Accept</button><button class="btn" data-net="counter" data-id="${t.id}">Counter-offer</button><button class="btn" data-net="decline" data-id="${t.id}">Decline</button>${ok ? '' : '<span class="muted small">You do not have the cards they want.</span>'}</div></div>`;
         }).join('') : '<div class="empty"><p>No offers right now.</p></div>'}</section>
         <section><h2>Your offers <span class="muted small">${out.length}</span></h2>${out.length ? out.map((o) => `<div class="panel tr-offer"><div class="tr-head">To <b>${esc(o.toName)}</b> <span class="muted small">· waiting for an answer · your cards are held until it is settled</span></div>${o.msg ? `<p class="tr-msg">“${esc(o.msg)}”</p>` : ''}${mini(o.give)}<div class="tr-head"><span class="muted">${o.want.length ? 'for' : 'as a gift'}</span></div>${o.want.length ? mini(o.want) : ''}
           <div class="row wrap"><button class="btn" data-net="cancel" data-id="${o.id}">Cancel offer</button></div></div>`).join('') : '<div class="empty"><p>You have no offers out.</p></div>'}</section>
-        <section><h2>History</h2>${s.net.hist.length ? `<ul class="tr-hist">${s.net.hist.map((h) => `<li><span class="muted small">${new Date(h.at).toLocaleString('en-GB')}</span> ${esc(h.text)}</li>`).join('')}</ul>` : '<div class="empty"><p>Nothing yet.</p></div>'}</section>`;
+        <section><h2>History</h2>${s.net.hist.length ? `<ul class="tr-hist">${s.net.hist.map((h) => `<li><span class="muted small">${new Date(h.at).toLocaleString('en-GB')}</span> ${esc(h.text)}</li>`).join('')}</ul>` : '<div class="empty"><p>Nothing yet.</p></div>'}</section>`);
     }
     // ---------- card picker ----------
     // Shared by the trade page and the board. A filterable grid of cards: tap one to pick it. If there is more than one copy (or both a normal and
@@ -612,7 +631,7 @@
         <div class="row wrap" style="margin-top:14px"><button class="btn primary" id="trSend" type="button">${tb.gift ? 'Send gift' : 'Send offer'}</button><button class="btn" data-act="close-modal" type="button">Back</button></div>`, 'wide');
       $('#trSend', bg).onclick = async () => {
         const btn = $('#trSend', bg); btn.disabled = true;
-        try { await createTrade(tb.to, give, want, tb.msg); if (tb.replace) await decline(tb.replace); ctx.closeModal(bg); toast(tb.gift ? 'Gift sent' : 'Offer sent'); resetTb(); location.hash = '#trades'; if (location.hash === '#trades') drawTrades(); }
+        try { await createTrade(tb.to, give, want, tb.msg, tb.replace); if (tb.replace) await decline(tb.replace); ctx.closeModal(bg); toast(tb.gift ? 'Gift sent' : 'Offer sent'); resetTb(); location.hash = '#trades'; if (location.hash === '#trades') drawTrades(); }
         catch (e) { toast(e.message, true); btn.disabled = false; }
       };
     }
@@ -664,7 +683,7 @@
         ${list.length ? `<div class="board">${list.map((x) => { const me = x.pid === s.profile.id, them = net.dir.find((p) => p.id === x.pid);
           return `<article class="panel board-post"><header><a class="pl-top" href="#user-${x.pid}">${them ? ctx.avatarHTML(34, them) : ''}<b>${esc(x.name)}</b></a><small class="muted">${ago(x.at)}</small></header>
           ${x.want.length ? `<h3>Looking for</h3>${thumbs(x.want)}` : ''}${x.offer.length ? `<h3>Offering</h3>${thumbs(x.offer)}` : ''}${x.note ? `<p class="tr-msg">${esc(x.note)}</p>` : ''}
-          <div class="row wrap">${me ? `<button class="btn sm danger" data-bd-rm="${x.num}" type="button">Remove my post</button>` : `<button class="btn sm primary" data-bd-offer="${x.num}" type="button" ${them && them.full ? '' : 'disabled'}>Make an offer</button>`}</div></article>`; }).join('')}</div>` : '<div class="empty"><h2>Nothing posted yet</h2><p class="muted">Be the first. Post what you are hunting for.</p></div>'}`;
+          <div class="row wrap">${me ? `<button class="btn sm danger" data-bd-rm="${x.num}" type="button">Remove my post</button>` : `<button class="btn sm primary" data-bd-offer="${x.num}" type="button" ${them && them.full ? '' : 'disabled'}>Make an offer</button>`}<button class="btn sm cm-toggle" data-cm="${x.num}" data-owner="${x.pid}" type="button" aria-expanded="false">💬 Comments${x.ccount ? ' (' + x.ccount + ')' : ''}</button></div><div class="cm-box" id="cm-${x.num}" hidden></div></article>`; }).join('')}</div>` : '<div class="empty"><h2>Nothing posted yet</h2><p class="muted">Be the first. Post what you are hunting for.</p></div>'}`;
       $$('.card', $('#main')).forEach(ctx.tilt); paint();
       $('#bdPost').onclick = openPost;
       $('#main').onclick = async (e) => {
@@ -719,6 +738,6 @@
     }
     // The Online panel in Settings is switched off. Return settingsHTML/bindSettings below to bring it back (share toggle, own token, restore from cloud).
     const SHOW_SETTINGS = false;
-    return { rankOf: rankOf, logRedeem: logRedeem, weekStart: weekStart, log: (text) => updateConfig(() => {}, text), gh: gh, conf: conf, enabled: enabled, refresh: refresh, updateConfig: updateConfig, saveCardImage: saveCardImage, closeIssue: closeIssue, createIssue: createIssue, loadCache: loadCache, start: start, touch: touch, flush: flush, diag: diag, paint: paint, cycle: cycle, pageBoard: pageBoard, pagePost: pagePost, pageTrade: pageTrade, incoming: incoming, outgoing: outgoing, recentPulls: recentPulls, pagePlayers: pagePlayers, pageUser: pageUser, pageTrades: pageTrades, settingsHTML: () => (SHOW_SETTINGS ? settingsHTML() : ''), bindSettings: () => { if (SHOW_SETTINGS) bindSettings(); }, state: net, build: build };
+    return { approvedPid: approvedPid, rankOf: rankOf, logRedeem: logRedeem, weekStart: weekStart, log: (text) => updateConfig(() => {}, text), gh: gh, conf: conf, enabled: enabled, refresh: refresh, updateConfig: updateConfig, saveCardImage: saveCardImage, closeIssue: closeIssue, createIssue: createIssue, loadCache: loadCache, start: start, touch: touch, flush: flush, diag: diag, paint: paint, cycle: cycle, pageBoard: pageBoard, pagePost: pagePost, pageTrade: pageTrade, incoming: incoming, outgoing: outgoing, recentPulls: recentPulls, pagePlayers: pagePlayers, pageUser: pageUser, pageTrades: pageTrades, settingsHTML: () => (SHOW_SETTINGS ? settingsHTML() : ''), bindSettings: () => { if (SHOW_SETTINGS) bindSettings(); }, state: net, build: build };
   };
 })();

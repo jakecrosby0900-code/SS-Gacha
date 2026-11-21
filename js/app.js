@@ -9,7 +9,7 @@
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  const tcls = (t) => 't-' + String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  const tcls = (t) => 't-' + String((G.TIER_KEY && G.TIER_KEY[t]) || t).toLowerCase().replace(/[^a-z0-9]+/g, '-'); // renamed built-in rarities keep their original look
   const reduceMotion = () => S.settings.motion === false || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const fmt = (n) => Math.round(n).toLocaleString('en-US');
@@ -24,7 +24,9 @@
       // The "fake account": lives in the save file. id is random and only there so a leaderboard can tell players apart later.
       profile: { id: uid(), name: 'Player', bio: '', pfp: null, banner: null, hue: 28, joined: Date.now() }, codes: [], account: null,
       // trading + online bookkeeping: out = offers I sent (cards held in escrow), done = settled trade ids, q = updates still to send, hist = recent trade log
-      net: { out: {}, done: {}, q: [], hist: [], miss: {}, log: [] } };
+      net: { out: {}, done: {}, q: [], hist: [], miss: {}, log: [] },
+      // notifications + friends/comments bookkeeping: notes = the notification list, nseen = ids already announced, seen = messages/comments already read, badges = badge names last seen
+      social: { notes: [], nseen: {}, seen: {}, badges: null } };
   }
   function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
   const isObj = (x) => x && typeof x === 'object' && !Array.isArray(x);
@@ -47,6 +49,9 @@
     s.net = { out: isObj(jn.out) ? jn.out : {}, done: isObj(jn.done) ? jn.done : {}, q: Array.isArray(jn.q) ? jn.q.slice(0, 50) : [], hist: Array.isArray(jn.hist) ? jn.hist.slice(0, 30) : [], miss: isObj(jn.miss) ? jn.miss : {},
       // recent settled trades, shown on the home page: dir from/to, who, a = cards I gave, b = cards I got, st = outcome
       log: Array.isArray(jn.log) ? jn.log.filter(isObj).slice(0, 20).map((x) => ({ at: +x.at || 0, dir: x.dir === 'to' ? 'to' : 'from', who: String(x.who || '').slice(0, 20), a: Math.max(0, +x.a | 0), b: Math.max(0, +x.b | 0), st: ['accepted', 'denied', 'cancelled', 'invalid'].indexOf(x.st) >= 0 ? x.st : 'invalid' })) : [] };
+    const sj = isObj(j.social) ? j.social : {};
+    s.social = { notes: Array.isArray(sj.notes) ? sj.notes.filter((x) => isObj(x) && typeof x.id === 'string').slice(0, 60).map((x) => ({ id: x.id.slice(0, 80), at: +x.at || 0, type: String(x.type || 'info').slice(0, 12), text: String(x.text || '').slice(0, 200), href: String(x.href || '').slice(0, 80), read: x.read ? 1 : 0 })) : [],
+      nseen: isObj(sj.nseen) ? sj.nseen : {}, seen: isObj(sj.seen) ? sj.seen : {}, badges: Array.isArray(sj.badges) ? sj.badges.map(String).slice(0, 80) : null };
     return s;
   }
   function load() {
@@ -208,18 +213,19 @@
   function closeModal(bg) { (bg || $$('.modal-bg').pop())?.remove(); if (!$('.modal-bg')) document.documentElement.classList.remove('modal-open'); }
 
   // ---------- header ----------
-  const NAV = [['home', 'Home', '🎴', 1], ['collection', 'Collection', '🗂️', 1], ['index', 'Index', '📖', 0], ['leaderboard', 'Leaderboard', '🏆', 1], ['trades', 'Trades', '⇄', 1], ['board', 'Board', '📋', 0], ['profile', 'Profile', '👤', 0], ['options', 'Settings', '⚙️', 0]]; // [page, label, icon, shown in the phone's bottom bar]
-  let net = null, auth = null, admin = null; // the online layer (js/net.js), accounts (js/auth.js) and admin (js/admin.js), created at the bottom
+  const NAV = [['home', 'Home', '🎴', 1], ['collection', 'Collection', '🗂️', 1], ['index', 'Index', '📖', 0], ['leaderboard', 'Leaderboard', '🏆', 1], ['trades', 'Trades', '⇄', 1], ['board', 'Board', '📋', 0], ['friends', 'Friends', '🤝', 0], ['profile', 'Profile', '👤', 0], ['options', 'Settings', '⚙️', 0]]; // [page, label, icon, shown in the phone's bottom bar]
+  let net = null, auth = null, admin = null, social = null; // the online layer (js/net.js), accounts (js/auth.js) and admin (js/admin.js), created at the bottom
   const BOLT = '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M13.5 2 4 13.5h6.2L8.5 22 20 9.8h-6.6z" fill="currentColor"/></svg>';
-  const navLink = ([h, l, ic], cur) => `<a href="#${h}" style="order:${NAV.findIndex((n) => n[0] === h)}" ${cur === h ? 'aria-current="page"' : ''}><span class="ni" aria-hidden="true">${ic}</span><span class="nl">${l}</span>${h === 'trades' ? '<span class="nbadge" data-tradebadge hidden></span>' : ''}</a>`;
+  const navLink = ([h, l, ic], cur) => `<a href="#${h}" style="order:${NAV.findIndex((n) => n[0] === h)}" ${cur === h ? 'aria-current="page"' : ''}><span class="ni" aria-hidden="true">${ic}</span><span class="nl">${l}</span>${h === 'trades' ? '<span class="nbadge" data-tradebadge hidden></span>' : ''}${h === 'friends' ? '<span class="nbadge" data-friendbadge hidden></span>' : ''}</a>`;
   function renderHeader() {
-    if (!auth || !auth.loggedIn()) { $('#header').innerHTML = `<a class="logo" href="#home">${BOLT}<span>Special Strike <b>Gacha</b></span></a>`; return; }
-    const cur0 = (location.hash.slice(1) || 'home').split('-')[0], cur = cur0 === 'user' ? 'leaderboard' : cur0 === 'players' ? 'leaderboard' : cur0 === 'trade' ? 'trades' : cur0 === 'post' ? 'board' : cur0;
-    $('#header').innerHTML = `<a class="logo" href="#home">${BOLT}<span>Special Strike <b>Gacha</b></span></a>
+    if (!auth || !auth.loggedIn() || gated()) { const hd0 = $('#header'); hd0.dataset.sig = ''; hd0.innerHTML = `<a class="logo" href="#home">${BOLT}<span>Special Strike <b>Gacha</b></span></a>`; return; }
+    const cur0 = (location.hash.slice(1) || 'home').split('-')[0], cur = cur0 === 'user' ? 'leaderboard' : cur0 === 'players' ? 'leaderboard' : cur0 === 'trade' ? 'trades' : cur0 === 'post' ? 'board' : cur0 === 'chat' ? 'friends' : cur0 === 'imagereq' ? 'options' : cur0;
+    const hd = $('#header'), html = `<a class="logo" href="#home">${BOLT}<span>Special Strike <b>Gacha</b></span></a>
       <nav class="main" aria-label="Main">${NAV.filter((n) => n[3]).map((n) => navLink(n, cur)).join('')}<button type="button" class="nav-more${NAV.some(([h, , , pri]) => !pri && h === cur) ? ' on' : ''}" data-act="nav-more" aria-expanded="false" style="order:${NAV.length}"><span class="ni" aria-hidden="true">⋯</span><span class="nl">More</span></button><div class="more-sheet">${NAV.filter((n) => !n[3]).map((n) => navLink(n, cur)).join('')}</div></nav>
       <div class="top-right"><a class="chip" href="#home" title="Packs ready"><span class="pk"></span><b data-hud="packs">${S.packs}</b><small class="muted">/ ${D().cap}</small><i class="bonus-mini" data-hud-bonus title="Bonus packs from codes and gifts">${S.bonus ? '+' + S.bonus : ''}</i></a>
-        <a class="me" href="#profile" title="${esc(S.profile.name)}">${avatarHTML(32)}<i class="netdot" data-netdot></i></a>
+        <a class="icon-btn bell" href="#notifications" aria-label="Notifications" title="Notifications">🔔<b class="bell-n" data-notebadge hidden></b></a><a class="me" href="#profile" title="${esc(S.profile.name)}">${avatarHTML(32)}<i class="netdot" data-netdot></i></a>
         <button class="icon-btn" data-act="toggle-sound" aria-label="Sound ${S.settings.sound ? 'on' : 'off'}" title="Sound">${S.settings.sound ? '🔊' : '🔇'}</button></div>`;
+    if (hd.dataset.sig !== html) { hd.innerHTML = html; hd.dataset.sig = html; } // unchanged header is left alone (no flicker, open menus stay open)
     if (net) net.paint();
   }
   function updateHud() {
@@ -302,19 +308,43 @@
     ['Rare Hunter', '💎', [1, 3, 6, 10, 15], (m) => m.rare, 'Legendary or better'],
   ];
   const RANK_STEPS = [100, 50, 10, 3, 1];
+  // What each badge is for, shown when you click it.
+  const BADGE_INFO = {
+    'Dedicated': 'Earned by opening packs. Every pack you open counts.',
+    'Collector': 'Earned by your total collection points. Every copy counts, and skibidi copies are worth extra.',
+    'Completion': 'Earned by finding different cards. It is the share of the whole card list found at least once.',
+    'Skibidi Star': 'Earned by owning skibidi (holo) versions of different cards. Each card only counts once.',
+    'Copycat': 'Earned by duplicates: every extra copy of a card you already own counts.',
+    'Rare Hunter': 'Earned by owning different cards of Legendary rarity or better.',
+    'Top Player': 'Earned by your place on the leaderboard (most points). Climb the ranks to level it up.'
+  };
+  let badgeList = []; // the badges currently on screen, so a click can look one up
   function tierBadges(cards, opened, rank) {
-    const ents = Object.keys(cards).filter((id) => BYID[id] && cards[id] && cards[id].n > 0);
+    const ents = Object.keys(cards).filter((id) => BYID[id] && cards[id] && cards[id].n > 0), total = CARDS.length || 1;
     const m = { opened: opened || 0, score: G.scoreOf(cards), sk: ents.filter((id) => cards[id].h > 0).length, dupes: ents.reduce((a, id) => a + cards[id].n - 1, 0), pct: CARDS.length ? ents.length / CARDS.length * 100 : 0, rare: ents.filter((id) => BYID[id].fx >= 4).length };
     const out = BADGE_DEFS.map(([name, ic, th, val, unit]) => {
-      const v = val(m), tier = th.filter((t) => v >= t).length, next = th[tier];
-      return { name, ic, tier, max: th.length, pct: next ? Math.max(0, Math.min(100, (v - (th[tier - 1] || 0)) / (next - (th[tier - 1] || 0)) * 100)) : 100, tip: `${fmt(v)} ${unit}${next ? ` · next level at ${fmt(next)}` : ' · max level'}` };
+      const v = val(m), tier = th.filter((t) => v >= t).length, next = th[tier], isPct = name === 'Completion';
+      const need = !next ? 'Max level reached. Nothing more to earn here.' : isPct ? `${Math.max(1, Math.ceil(next / 100 * total) - ents.length)} more card${Math.ceil(next / 100 * total) - ents.length === 1 ? '' : 's'} to find to reach level ${tier + 1} (${next}% of all cards).` : `${fmt(Math.ceil(next - v))} more ${unit} to reach level ${tier + 1} (${fmt(next)} in total).`;
+      return { name, ic, tier, max: th.length, pct: next ? Math.max(0, Math.min(100, (v - (th[tier - 1] || 0)) / (next - (th[tier - 1] || 0)) * 100)) : 100, tip: `${fmt(v)} ${unit}${next ? ` · next level at ${fmt(next)}` : ' · max level'}`,
+        info: BADGE_INFO[name], now: isPct ? `${ents.length} of ${CARDS.length} cards (${(Math.round(v * 10) / 10)}%)` : `${fmt(v)} ${unit}`, need, levels: th.map((t) => (isPct ? `${t}% (${Math.ceil(t / 100 * total)} cards)` : fmt(t))), unit: isPct ? 'of all cards found' : unit };
     });
-    const rt = rank > 0 ? RANK_STEPS.filter((r) => rank <= r).length : 0;
-    out.push({ name: 'Top Player', ic: '👑', tier: rt, max: RANK_STEPS.length, pct: rt === RANK_STEPS.length ? 100 : 0, tip: rank > 0 ? `Leaderboard rank #${fmt(rank)}` : 'Not ranked yet', sub: rank > 0 ? '#' + fmt(rank) : '' });
-    G.badgesOf(cards, opened, 0).filter((b) => b.ic === '📚' || b.ic === '🌟').forEach((b) => out.push({ name: b.name, ic: b.ic, tier: 1, max: 1, pct: 100, tip: b.tip, solo: true }));
+    const rt = rank > 0 ? RANK_STEPS.filter((r) => rank <= r).length : 0, rnext = RANK_STEPS[rt];
+    out.push({ name: 'Top Player', ic: '👑', tier: rt, max: RANK_STEPS.length, pct: rt === RANK_STEPS.length ? 100 : 0, tip: rank > 0 ? `Leaderboard rank #${fmt(rank)}` : 'Not ranked yet', sub: rank > 0 ? '#' + fmt(rank) : '',
+      info: BADGE_INFO['Top Player'], now: rank > 0 ? `Rank #${fmt(rank)} on the leaderboard` : 'Not ranked yet', levels: RANK_STEPS.map((r) => (r === 1 ? 'Rank #1' : 'Top ' + r)),
+      need: rt === RANK_STEPS.length ? 'Max level reached. This is the very top.' : rank > 0 ? `Reach rank #${rnext} or better to get level ${rt + 1} (${fmt(rank - rnext)} place${rank - rnext === 1 ? '' : 's'} to climb).` : `Earn points to appear on the leaderboard, then climb to the top ${rnext}.` });
+    G.badgesOf(cards, opened, 0).filter((b) => b.ic === '📚' || b.ic === '🌟').forEach((b) => out.push({ name: b.name, ic: b.ic, tier: 1, max: 1, pct: 100, tip: b.tip, solo: true, info: b.tip, now: 'Earned', levels: [], need: 'A one-off badge. Nothing more to earn here.' }));
     return out;
   }
-  const badgeTilesHTML = (list) => `<div class="bdg-row" aria-label="Badges">${list.map((b) => `<div class="bdg ${b.tier ? 'on' : 'off'} bt${b.solo ? 5 : b.tier}" title="${esc(b.tip)}"><span class="bdg-ic">${b.ic}</span><b>${esc(b.name)}</b>${b.solo ? '' : `<span class="bdg-dots" aria-label="Level ${b.tier} of ${b.max}">${Array.from({ length: b.max }, (_, i) => `<i class="${i < b.tier ? 'fl' : ''}"></i>`).join('')}</span>${b.sub ? `<small>${esc(b.sub)}</small>` : `<span class="bdg-bar"><i style="width:${b.pct.toFixed(0)}%"></i></span>`}`}</div>`).join('')}</div>`;
+  const badgeTilesHTML = (list) => { badgeList = list; return `<div class="bdg-row" aria-label="Badges">${list.map((b, i) => `<button type="button" class="bdg ${b.tier ? 'on' : 'off'} bt${b.solo ? 5 : b.tier}" data-act="badge" data-i="${i}" title="${esc(b.tip)}" aria-label="${esc(b.name)}: show details"><span class="bdg-ic">${b.ic}</span><b>${esc(b.name)}</b>${b.solo ? '' : `<span class="bdg-dots" aria-label="Level ${b.tier} of ${b.max}">${Array.from({ length: b.max }, (_, i) => `<i class="${i < b.tier ? 'fl' : ''}"></i>`).join('')}</span>${b.sub ? `<small>${esc(b.sub)}</small>` : `<span class="bdg-bar"><i style="width:${b.pct.toFixed(0)}%"></i></span>`}`}</button>`).join('')}</div>`; };
+  function badgeModal(i) {
+    const b = badgeList[i]; if (!b) return;
+    modal(`<div class="bd-detail bt${b.solo ? 5 : b.tier}"><div class="bd-head"><span class="bdg-ic">${b.ic}</span><div><h2>${esc(b.name)}</h2><p class="muted small">${b.solo ? 'One-off badge' : b.tier ? `Level ${b.tier} of ${b.max}` : `Not earned yet · ${b.max} levels`}</p></div></div>
+      <p>${esc(b.info || '')}</p>
+      <p class="bd-now"><span class="muted small">Right now</span><b>${esc(b.now)}</b></p>
+      ${b.solo ? '' : `<div class="bdg-bar big"><i style="width:${b.pct.toFixed(0)}%"></i></div>`}
+      <p class="bd-need">${esc(b.need)}</p>
+      ${b.levels.length ? `<ol class="bd-levels">${b.levels.map((l, k) => `<li class="${k < b.tier ? 'done' : k === b.tier ? 'next' : ''}"><span>${k < b.tier ? '✓' : k + 1}</span>Level ${k + 1}<b>${esc(l)}</b></li>`).join('')}</ol>${b.name === 'Top Player' || b.unit === 'of all cards found' ? '' : `<p class="muted small">Levels are counted in ${esc(b.unit)}.</p>`}` : ''}</div>`);
+  }
   const pct2 = (x) => (Math.round(x * 100) / 100).toFixed(2) + '%';
   const joinedTxt = (t) => new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   // Used for your own profile and for other players' profiles. ov overrides the computed numbers (for players we only have a summary of).
@@ -333,7 +363,7 @@
     const sections = ov.lite ? `<p class="muted">Only a summary is available right now. Connect GitHub in Settings to see their cards.</p>`
       : `<section><h2>Favorite cards</h2>${row(favs, ov.mine ? 'No favorites yet. Click a card and press Favorite.' : 'No favorites yet.')}</section><section><h2>Recently obtained</h2>${row(recent, 'No cards yet.')}</section>${full && !ov.mine ? `<section><h2>Collection <span class="muted small">${ents.length} cards</span></h2>${row(ents.slice().sort(byRar), 'Nothing yet.')}</section>` : ''}`;
     return `<section class="pf2"><div class="pf2-banner" style="${bannerCSS(p)}"><span class="pf2-joined">Joined ${joinedTxt(p.joined)}</span></div>
-        <div class="pf2-head"><div class="pf2-av">${avatarHTML(104, p)}${ov.rank > 0 ? `<span class="pf2-rank"><b>#${fmt(ov.rank)}</b><small>RANK</small></span>` : ''}</div>
+        <div class="pf2-head"><div class="pf2-av">${avatarHTML(104, p)}${ov.rank > 0 ? `<span class="pf2-rank"><small>RANK</small><b>#${fmt(ov.rank)}</b></span>` : ''}</div>
           <div class="pf2-id"><h1>${esc(p.name)}${ov.online ? ' <span class="online-dot" title="Online now"></span>' : ''}${ov.acct && ov.acct.toLowerCase() !== String(p.name).toLowerCase() ? ` <span class="pf2-user">@${esc(ov.acct)}</span>` : ''}</h1><p class="pf2-bio ${bio ? '' : 'muted'}">${bio ? esc(bio) : 'No bio yet.'}</p></div>
           <div class="pf2-actions">${actions || ''}</div></div></section>
       ${ov.after || ''}
@@ -342,7 +372,7 @@
       ${sections}${ov.lite ? '' : `<section><h2>Best cards</h2>${best.length ? `<div class="best-row">${best.map(([id, e]) => `<button class="card-btn" data-act="card" data-id="${id}"${src}>${cardHTML(BYID[id], { holo: e.h > 0, count: e.n, fav: e.f })}</button>`).join('')}</div>` : '<div class="muted">Your best cards show up here once you pull some.</div>'}</section>`}${ov.tail || ''}`;
   }
   function pageProfile() {
-    main().innerHTML = profileHTML(S.profile, S.cards, S.stats, '<button class="btn" data-act="edit-profile">Edit profile</button><a class="btn" href="#collection">View collection</a>', false, { mine: true, show: S.showcase, acct: S.account, rank: net.state.loaded ? net.rankOf(S.profile) : 0 });
+    main().innerHTML = profileHTML(S.profile, S.cards, S.stats, '<button class="btn" data-act="edit-profile">Edit profile</button><a class="btn" href="#collection">View collection</a>', false, { mine: true, show: S.showcase, acct: (auth.session() || {}).u || null, rank: net.state.loaded ? net.rankOf(S.profile) : 0 });
     $$('.card', main()).forEach(tilt); if (Date.now() - net.state.last > 20000) net.cycle();
   }
 
@@ -360,9 +390,10 @@
     if (S.codes.includes(k)) return false;
     S.codes.push(k); const now = Date.now(), got = [];
     if (c.packs) S.bonus = (S.bonus || 0) + c.packs;
-    (c.cards || []).forEach((id) => { if (!BYID[id]) return; const e = S.cards[id]; if (!e) S.cards[id] = { n: 1, h: 0, t: now, l: now, f: 0 }; else { e.n++; e.l = now; } got.push(BYID[id].name); });
+    (c.cards || []).forEach((id) => { if (!BYID[id] || (BYID[id].monster && !S.settings.monster)) return; const e = S.cards[id]; if (!e) S.cards[id] = { n: 1, h: 0, t: now, l: now, f: 0 }; else { e.n++; e.l = now; } got.push(BYID[id].name); });
     save(); renderHeader(); if (!opening) route();
     if (net.enabled()) net.logRedeem(k);
+    if ((c.cards || []).some((id) => BYID[id] && BYID[id].monster && !S.settings.monster)) setTimeout(() => toast('A Monster card in that code was held back: let the monster in (Settings) to receive them.', true), 600);
     toast(`Code accepted${c.packs ? `: +${c.packs} bonus pack${c.packs === 1 ? '' : 's'}` : ''}${got.length ? ` and ${got.join(', ')}` : ''}`);
     return true;
   }
@@ -521,6 +552,7 @@
         <label class="f inline">Volume<input id="optVol" type="range" min="0" max="1" step="0.05" value="${S.settings.volume}"></label>
         <label class="check"><input id="optMotion" type="checkbox" ${S.settings.motion ? 'checked' : ''}> Animations</label></div></section>
       <section class="panel"><h2>The Monster 👹</h2><label class="check"><input id="optMonster" type="checkbox" ${S.settings.monster ? 'checked' : ''}> Let the monster in</label><p class="muted small">Each pack you open has a 25% chance that the monster eats one random card from it. Eaten cards are gone for good and never reach your collection. But with the monster in, ${G.MONSTER_POOL.length} special cards of the Monster rarity can also drop that cannot be found any other way. Monster is a little rarer than Sigma.</p></section>
+      <section class="panel"><h2>Card images 🖼️</h2><p class="muted small">Think a card needs a better picture? Pick the card, send your image, and an admin can approve it. If it is approved, everyone sees it.</p><a class="btn" href="#imagereq">Request a card image</a></section>
       ${net ? net.settingsHTML() : ''}
       ${auth ? auth.settingsHTML() : ''}
       ${admin ? admin.settingsHTML() : ''}`;
@@ -554,21 +586,43 @@
   }
   function popSet(html) { if (popup.el) { popup.el.innerHTML = html; $$('.card', popup.el).forEach(tilt); } }
   // Click anywhere else (except on something that opens a popover itself) to close it. Capture phase, so a new popover can open straight after.
-  document.addEventListener('click', (e) => { if (popup.el && !e.target.closest('.cardpop') && !e.target.closest('[data-act="card"],[data-pick]')) popClose(); }, true);
+  document.addEventListener('click', (e) => { if (popup.el && !e.target.closest('.cardpop') && !e.target.closest('.zoomview') && !e.target.closest('[data-act="card"],[data-pick]')) popClose(); }, true);
   addEventListener('scroll', () => { if (popup.el && popup.key && popup.key.indexOf('card:') === 0) popClose(); }, true);
   addEventListener('resize', popClose);
 
   // Every copy of a card as its own card, like the reference. cards = whose collection to show (mine by default).
   function cardPopHTML(id, cards, who) {
     const c = BYID[id], e = cards[id], own = !!(e && e.n > 0), mine = !who, copies = [];
-    if (own) { for (let i = 0; i < e.n - e.h; i++) copies.push(0); for (let i = 0; i < e.h; i++) copies.push(1); }
+    if (own) { for (let i = 0; i < e.h; i++) copies.push(1); for (let i = 0; i < e.n - e.h; i++) copies.push(0); } // skibidi copies count first (see scoring)
     const n = copies.length, shown = copies.slice(0, 24), size = !own ? 176 : n <= 2 ? 176 : n <= 4 ? 150 : n <= 8 ? 120 : 96, mineE = S.cards[id], iOwn = !!(mineE && mineE.n > 0);
-    const tiles = own ? shown.map((h) => `<div class="pop-copy">${cardHTML(c, { holo: !!h, size })}</div>`).join('') : `<div class="pop-copy">${cardHTML(c, { locked: !!c.monster, ghost: !c.monster, size })}</div>`;
+    const tiles = own ? shown.map((h, k) => `<button type="button" class="pop-copy" data-act="zoom" data-id="${id}" data-h="${h}" data-k="${k + 1}" aria-label="Look closer at copy ${k + 1}">${cardHTML(c, { holo: !!h, size })}<small class="pop-val">${k ? `copy ${k + 1} · ` : ''}+${fmtPts(G.copyValue(c, k + 1, h))} pt${G.copyValue(c, k + 1, h) === 1 ? '' : 's'}</small></button>`).join('') : `<button type="button" class="pop-copy" data-act="zoom" data-id="${id}" data-h="0" data-k="0" data-locked="1" aria-label="Look closer">${cardHTML(c, { locked: !!c.monster, ghost: !c.monster, size })}</button>`;
     const action = mine ? (own ? `<button class="btn sm" data-act="fav" data-id="${id}">${e.f ? '★ Unfavorite' : '☆ Favorite'}</button>` : `<button class="btn sm ${S.wish[id] ? 'primary' : ''}" data-act="wish" data-id="${id}">${S.wish[id] ? '🔖 On your wishlist' : '🔖 Add to wishlist'}</button>`)
       : (!iOwn ? `<button class="btn sm ${S.wish[id] ? 'primary' : ''}" data-act="wish" data-id="${id}">${S.wish[id] ? '🔖 On your wishlist' : '🔖 Add to wishlist'}</button>` : '');
     return `<div class="pop-head"><div class="pop-title"><b>#${c.rank} ${own || !c.monster ? esc(c.name) : '???'}</b><span class="muted small">${own ? `${n} cop${n === 1 ? 'y' : 'ies'}${e.h ? ` · ${e.h} skibidi` : ''}${who ? ` · ${esc(who)}` : ''}` : who ? `${esc(who)} has none` : 'Not found yet'}</span></div><button type="button" class="pop-x" data-act="close-pop" aria-label="Close">✕</button></div>
       <div class="pop-copies">${tiles}</div>${n > shown.length ? `<p class="muted small">Showing ${shown.length} of ${n} copies.</p>` : ''}
       <div class="pop-foot"><span class="pop-meta"><span class="tier-text ${tcls(c.tier)}">${c.tier}</span> · ${esc(c.cat)} · ${c.pts} pt${c.pts === 1 ? '' : 's'}</span>${action}</div>`;
+  }
+  const fmtPts = (v) => (Math.abs(v - Math.round(v)) < 0.05 ? String(Math.round(v)) : v.toFixed(1));
+  // Click a copy in the card popup to see it big. Arrow keys / buttons step through the copies.
+  function zoomCard(tile) {
+    const list = $$('.pop-copy[data-id]', popup.el || document).map((t) => ({ id: t.dataset.id, h: +t.dataset.h, k: +t.dataset.k, locked: !!t.dataset.locked }));
+    if (!list.length) return;
+    let i = Math.max(0, $$('.pop-copy[data-id]', popup.el || document).indexOf(tile));
+    const bg = document.createElement('div'); bg.className = 'zoomview'; bg.setAttribute('role', 'dialog'); bg.setAttribute('aria-modal', 'true'); bg.setAttribute('aria-label', 'Card close-up');
+    document.body.append(bg);
+    const draw = () => {
+      const it = list[i], c = BYID[it.id], w = Math.round(Math.max(180, Math.min(440, innerWidth * 0.86, (innerHeight - 190) * 5 / 7)));
+      bg.innerHTML = `<button type="button" class="zoom-x" data-zoom="close" aria-label="Close">✕</button>
+        ${list.length > 1 ? '<button type="button" class="zoom-nav prev" data-zoom="prev" aria-label="Previous copy">‹</button><button type="button" class="zoom-nav next" data-zoom="next" aria-label="Next copy">›</button>' : ''}
+        <div class="zoom-stage">${cardHTML(c, { holo: !!it.h, size: w, locked: it.locked && c.monster, ghost: it.locked && !c.monster })}</div>
+        <p class="zoom-cap"><b>#${c.rank} ${it.locked && c.monster ? '???' : esc(c.name)}</b><span class="muted">${esc(c.tier)} · ${esc(c.cat)}${list.length > 1 ? ` · copy ${i + 1} of ${list.length}` : ''}${it.k ? ` · worth ${fmtPts(G.copyValue(c, it.k, it.h))} pt${G.copyValue(c, it.k, it.h) === 1 ? '' : 's'}` : ''}</span></p>`;
+      $$('.card', bg).forEach(tilt);
+    };
+    const close = () => { bg.remove(); removeEventListener('keydown', key, true); };
+    const step = (d) => { i = (i + d + list.length) % list.length; draw(); };
+    const key = (e) => { if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); close(); } else if (list.length > 1 && e.key === 'ArrowRight') step(1); else if (list.length > 1 && e.key === 'ArrowLeft') step(-1); };
+    bg.addEventListener('click', (e) => { const z = e.target.closest('[data-zoom]'); if (z) { z.dataset.zoom === 'close' ? close() : step(z.dataset.zoom === 'next' ? 1 : -1); } else if (!e.target.closest('.card')) close(); });
+    addEventListener('keydown', key, true); draw(); SFX.click(); const x = $('.zoom-x', bg); if (x) x.focus({ preventScroll: true });
   }
   function cardPop(id, anchor, src) {
     if (!BYID[id]) return;
@@ -637,14 +691,36 @@
     const finish = () => { fx.stop(); ov.remove(); opening = false; document.documentElement.classList.remove('pack-open'); document.documentElement.classList.toggle('modal-open', !!$('.modal-bg')); renderHeader(); route(); };
     try {
       await ripped; $('.tap-hint', ov)?.remove();
-      if (!skipped) { SFX.tear(); stage.classList.add('torn'); $('.flash', ov).classList.add('go'); fx.burst(['#b794ff', '#4ade80', '#fff', '#8b5cf6'], 90); await wait(950); }
-      stage.remove(); $('.tap-hint', ov)?.remove();
+      const fast = () => skipped || reduceMotion();
+      if (!skipped) { SFX.tear(); stage.classList.add('torn'); $('.flash', ov).classList.add('go'); fx.burst(['#b794ff', '#4ade80', '#fff', '#8b5cf6'], 90); }
       const sorted = all.slice().sort((a, b) => b.card.ti - a.card.ti || (b.holo ? 1 : 0) - (a.holo ? 1 : 0) || a.card.rank - b.card.rank);
       if (single) {
         const cs = results[0].slice().sort((a, b) => a.card.ti - b.card.ti);
+        // 1) light bursts out of the torn pack
+        if (!fast()) { const rays = document.createElement('div'); rays.className = 'pack-rays'; stage.append(rays); await wait(520); }
+        // 2) the cards jump out of the pack backs first, spin and land face down in a row
         const row = document.createElement('div'); row.className = 'reveal-row';
         row.innerHTML = cs.map((o, i) => `<div class="slot ${o.eaten ? 'eaten' : tcls(o.card.tier)}" data-i="${i}"><div class="flipper"><div class="face back"><div class="card-back">${BOLT}</div></div><div class="face front">${o.eaten ? MONSTER : cardHTML(o.card, { holo: o.holo })}</div></div><div class="reveal-label"></div></div>`).join('');
         ov.append(row);
+        if (!fast()) {
+          const pr = pack0.getBoundingClientRect(), px = pr.left + pr.width / 2, py = pr.top + pr.height * 0.3, slots = $$('.slot', row); let end = 0;
+          slots.forEach((slot, i) => {
+            const r = $('.flipper', slot).getBoundingClientRect(), dx = px - (r.left + r.width / 2), dy = py - (r.top + r.height / 2), k = i - (slots.length - 1) / 2, d = 80 + i * 120;
+            end = Math.max(end, d + 980);
+            slot.animate([
+              { transform: `translate(${dx}px, ${dy}px) scale(.45) rotate(${-k * 7}deg)`, opacity: 0, offset: 0 },
+              { transform: `translate(${dx}px, ${dy}px) scale(.45) rotate(${-k * 7}deg)`, opacity: 1, offset: 0.05, easing: 'cubic-bezier(.15,.75,.3,1)' },
+              { transform: `translate(${dx * 0.5 - k * 30}px, ${dy - 170 - Math.abs(k) * 10}px) scale(1.12) rotate(${k * 11}deg)`, opacity: 1, offset: 0.44, easing: 'cubic-bezier(.5,0,.85,.55)' },
+              { transform: `translate(${-k * 5}px, -12px) scale(1.04) rotate(${-k * 2}deg)`, opacity: 1, offset: 0.82, easing: 'ease-out' },
+              { transform: 'translate(0, 0) scale(1) rotate(0deg)', opacity: 1, offset: 1 }
+            ], { duration: 980, delay: d, fill: 'both' });
+            setTimeout(() => { if (!skipped) SFX.draw(); }, d + 30); setTimeout(() => { if (!skipped) SFX.place(); }, d + 800);
+          });
+          setTimeout(() => stage.classList.add('emptying'), 360);
+          await wait(end + 280);
+        }
+        stage.remove();
+        // 3) flip them over one at a time
         for (let i = 0; i < cs.length && !skipped; i++) {
           const o = cs[i], c = o.card, slot = $(`.slot[data-i="${i}"]`, row);
           await wait(380); if (skipped) break;
@@ -660,6 +736,7 @@
         if (!skipped) await wait(650);
         row.remove();
       } else {
+        await wait(skipped ? 0 : 950); stage.remove();
         for (const o of sorted) { if (skipped) break; if (o.card.fx >= 4) await specialReveal(ov, o, fx, () => skipped); }
         if (!skipped) { SFX.reveal(Math.floor(sorted[0].card.fx)); }
       }
@@ -704,11 +781,13 @@
     const act = t.dataset.act, id = t.dataset.id; unlockAudio(); applyAudio();
     switch (act) {
       case 'close-modal': closeModal(t.closest('.modal-bg')); break;
+      case 'badge': SFX.click(); badgeModal(+t.dataset.i); break;
       case 'toggle-sound': S.settings.sound = !S.settings.sound; applyAudio(); save(); renderHeader(); if (S.settings.sound) SFX.click(); break;
       case 'open-1': SFX.click(); openPacks(1); break;
       case 'open-all': SFX.click(); openPacks(avail()); break;
       case 'card': SFX.click(); cardPop(id, t, t.dataset.src); break;
       case 'close-pop': popClose(); break;
+      case 'zoom': zoomCard(t); break;
       case 'redeem': redeemModal(); break;
       case 'edit-profile': editProfile(); break;
       case 'nav-more': { const n = t.closest('nav'); const o = n.classList.toggle('open'); t.setAttribute('aria-expanded', String(o)); break; }
@@ -736,21 +815,60 @@
     });
   })();
 
-  const PAGES = { home: pageHome, collection: pageCollection, index: pageIndex, leaderboard: () => net.pagePlayers(), players: () => net.pagePlayers(), trades: () => net.pageTrades(), trade: () => net.pageTrade(), post: () => net.pagePost(), board: () => net.pageBoard(), profile: pageProfile, options: pageSettings, admin: () => admin.page() };
-  function route() {
+  const PAGES = { imagereq: () => social.pageImageReq(), notifications: () => social.pageNotifications(), friends: () => social.pageFriends(), home: pageHome, collection: pageCollection, index: pageIndex, leaderboard: () => net.pagePlayers(), players: () => net.pagePlayers(), trades: () => net.pageTrades(), trade: () => net.pageTrade(), post: () => net.pagePost(), board: () => net.pageBoard(), profile: pageProfile, options: pageSettings, admin: () => admin.page() };
+  // ---------- whitelist ----------
+  // A new account cannot use the site until the admin approves it (admin page > Players). 'ok' = in, 'pending' = waiting, 'checking' = not known yet.
+  const APPR = 'ss-gacha-approved';
+  function accessState() {
+    const se = auth && auth.session(); if (!se || !net.enabled()) return 'ok';
+    let cached = false; try { cached = localStorage.getItem(APPR) === se.k; } catch (e) { /* ignore */ }
+    const st = net.state;
+    if (st.loaded && st.complete && st.accounts.length) {
+      const a = st.accounts.find((x) => x.k === se.k);
+      if (a && G.isApproved(a)) { try { localStorage.setItem(APPR, se.k); } catch (e) { /* ignore */ } return 'ok'; }
+      if (!a && cached) return 'ok'; // not in a (lagging) listing: trust what we last saw
+      if (cached) { try { localStorage.removeItem(APPR); } catch (e) { /* ignore */ } }
+      return 'pending';
+    }
+    return cached ? 'ok' : 'checking';
+  }
+  const gated = () => { const h = location.hash.slice(1); return auth.loggedIn() && accessState() !== 'ok' && !(h === 'admin' && admin.unlocked()); };
+  let lastAccess = null; // access state at the last full draw: a change (approved, revoked) redraws the page
+  function pendingPage(state) {
+    const se = auth.session();
+    main().innerHTML = `<div class="auth-wrap"><section class="panel auth"><p class="eyebrow">Special Strike</p>
+      <h1>${state === 'checking' ? 'Checking your account…' : 'Waiting for approval'}</h1>
+      ${state === 'checking' ? '<p class="muted">One moment.</p>' : `<p class="muted">Your account <b>${esc(se ? se.u : '')}</b> was created. An admin has to let you in before you can play. This page checks automatically, so you can leave it open.</p>`}
+      <div class="row wrap"><button class="btn" id="pendCheck" type="button">Check again</button><button class="btn" id="pendOut" type="button">Log out</button></div>
+      <details style="margin-top:14px"><summary class="muted small">I am the admin</summary>${admin.settingsHTML()}</details></section></div>`;
+    $('#pendCheck').onclick = async (e) => { e.target.disabled = true; await net.cycle(true); route(); };
+    $('#pendOut').onclick = () => auth.logOut();
+    admin.bindSettings();
+  }
+  // route(true) is a quiet redraw used by background syncs: no entrance animation, scroll position and focus kept, and it never
+  // interrupts someone who is typing. A plain route() (navigation, a button press) behaves as before.
+  function route(soft) {
     if (!auth.loggedIn()) { renderHeader(); auth.page(); document.title = 'Sign in · Special Strike Gacha'; return; }
-    const h = (location.hash.slice(1) || 'home'), fn = h.indexOf('user-') === 0 ? () => net.pageUser(h.slice(5)) : (PAGES[h] || pageHome);
+    lastAccess = accessState();
+    if (gated()) { renderHeader(); pendingPage(lastAccess); document.title = 'Waiting for approval · Special Strike Gacha'; return; }
+    const quiet = soft === true, m = main(), ae = document.activeElement;
+    if (quiet && ae && m && m.contains(ae) && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) return;
+    const y = window.scrollY, fid = quiet && ae && ae.id ? ae.id : '';
+    const h = (location.hash.slice(1) || 'home'), fn = h.indexOf('user-') === 0 ? () => net.pageUser(h.slice(5)) : h.indexOf('chat-') === 0 ? () => social.pageChat(h.slice(5)) : (PAGES[h] || pageHome);
+    if (m) m.classList.toggle('soft', quiet);
     renderHeader(); fn(); updateHud();
     if (net.state.cfg) { const a = annHTML(); if (a) main().insertAdjacentHTML('afterbegin', a); }
     document.title = 'Special Strike Gacha';
+    if (quiet) { window.scrollTo({ top: y, left: 0, behavior: 'instant' }); if (fid) { const e = document.getElementById(fid); if (e && e.focus) e.focus({ preventScroll: true }); } }
   }
   addEventListener('hashchange', () => { route(); scrollTo(0, 0); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) updateHud(); });
   setInterval(updateHud, 1000);
   applyAudio();
-  const ctx = { G, S: () => S, save, toast, modal, closeModal, popOpen, popSet, popClose, popup, esc, $, $$, cardHTML, tilt, avatarHTML, bannerCSS, profileHTML, route, renderHeader, fmt, uid, normalize, hasCopy, takeCopy, addCopy, since, tcls, rarityCmp, busy: () => opening, refreshFeeds: () => refreshFeeds(),
+  const ctx = { G, S: () => S, save, toast, modal, closeModal, popOpen, popSet, popClose, popup, esc, $, $$, cardHTML, tilt, avatarHTML, bannerCSS, profileHTML, route, renderHeader, fmt, uid, normalize, hasCopy, takeCopy, addCopy, since, tcls, rarityCmp, busy: () => opening, refreshFeeds: () => refreshFeeds(), notify: function () { return social ? social.notify.apply(null, arguments) : null; },
+    setHTML: (el, html) => { if (!el || el.innerHTML === html) return; const y = window.scrollY; el.innerHTML = html; el.classList.add('soft'); window.scrollTo({ top: y, left: 0, behavior: 'instant' }); },
     restore: (j) => { S = normalize(Object.assign({}, j, { account: S.account || null })); save(); location.reload(); },
-    loggedIn: () => !!(auth && auth.loggedIn()), onSync: () => { if (auth) auth.watch(); },
+    loggedIn: () => !!(auth && auth.loggedIn()), allowed: () => accessState() === 'ok', onSync: () => { if (auth) auth.watch(); if (social) social.scan(); if (auth && auth.loggedIn()) { const a = accessState(); if (a !== lastAccess) route(); } },
     fresh, adopt: (j) => { S = normalize(j); save(true); }, rerenderSettings: () => pageSettings(),
     // Bring the account's newer cloud save in. keepLocal = this device has changes the cloud has not seen, so combine instead of replace (never loses a card).
     mergeCloud: (p, keepLocal) => {
@@ -770,28 +888,34 @@
         next.stats = { opened: Math.max(S.stats.opened, +(raw.stats && raw.stats.opened) || 0), pulls: Math.max(S.stats.pulls, +(raw.stats && raw.stats.pulls) || 0) };
         if (cloudNewer) { ['packs', 'last', 'sinceRare', 'started'].forEach((k) => { if (raw[k] != null) next[k] = raw[k]; }); if (raw.net) next.net = Object.assign({}, raw.net, { done: Object.assign({}, S.net.done, raw.net.done || {}) }); next.profile = Object.assign({}, S.profile, prof); }
         next.syncMod = p.mod; next.mod = Math.max(Date.now(), p.mod + 1);
+        const cs = raw.social || {}, ls = S.social || {}, byId = {}; (cs.notes || []).concat(ls.notes || []).forEach((x) => { if (!x || !x.id) return; const o = byId[x.id]; byId[x.id] = o ? Object.assign({}, o, x, { read: o.read || x.read ? 1 : 0 }) : x; });
+        next.social = { notes: Object.values(byId).sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 60), nseen: Object.assign({}, cs.nseen || {}, ls.nseen || {}), seen: Object.assign({}, cs.seen || {}, ls.seen || {}), badges: ls.badges || cs.badges || null };
       }
-      S = normalize(next); save(true); renderHeader(); if (!opening) route();
+      S = normalize(next); save(true); renderHeader(); if (!opening) route(true);
     } };
   net = window.SSGNet(ctx);
   auth = window.SSGAuth(Object.assign({}, ctx, { net }));
   admin = window.SSGAdmin(Object.assign({}, ctx, { net }));
+  social = window.SSGSocial(Object.assign({}, ctx, { net, auth })); ctx.social = social;
   // If the saved game on this device does not belong to the signed-in account any more (for example site data was cleared), sign in again.
-  (function () { const se = auth.session(); if (se && (S.account !== se.k || S.profile.id !== se.pid)) { try { localStorage.removeItem('ss-gacha-session'); } catch (e) { /* ignore */ } } })();
+  // A different player's save on this device means signing out. A save that merely lost its account link (or has a different internal id) is re-attached to the
+  // signed-in account instead, and the account's cloud copy is merged in by the next sync. That used to sign people out for no visible reason.
+  (function () {
+    const se = auth.session(); if (!se) return;
+    if (S.account && S.account !== se.k) { try { localStorage.removeItem('ss-gacha-session'); } catch (e) { /* ignore */ } return; }
+    if (S.account !== se.k || S.profile.id !== se.pid) { S.account = se.k; S.profile.id = se.pid; save(true); }
+  })();
   net.loadCache(); // show admin-made card changes straight away; the online sync refreshes them
   // ---------- auto update ----------
   // version.json holds the newest version number. A tab running an older one reloads itself (after uploading its save), so old tabs do not overwrite newer data.
-  const VERSION = 27;
+  const VERSION = 29;
   async function checkVersion() {
     try {
       const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;
       const j = await r.json(); if (!(+j.v > VERSION)) return;
-      if (opening || $('.modal-bg')) return; // wait for a quiet moment
-      let last = 0; try { last = +sessionStorage.getItem('ssg-reloaded') || 0; } catch (e) { /* ignore */ }
-      if (Date.now() - last < 300000) { if (!$('#updBar')) { const b = document.createElement('div'); b.id = 'updBar'; b.className = 'toast'; b.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:50'; b.innerHTML = 'A new version is out. <a href="#" onclick="location.reload(true);return false">Refresh</a>'; document.body.append(b); } return; }
-      try { sessionStorage.setItem('ssg-reloaded', String(Date.now())); } catch (e) { /* ignore */ }
-      save(true); try { if (net) net.flush(); } catch (e) { /* ignore */ }
-      setTimeout(() => location.reload(), 1200);
+      // Never reload by itself (that looked like random refreshes and could interrupt you): show a small bar and let the player choose when.
+      if (!$('#updBar')) { const b = document.createElement('div'); b.id = 'updBar'; b.className = 'toast'; b.style.cssText = 'position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:50;pointer-events:auto'; b.innerHTML = 'A new version is out. <a href="#" id="updGo">Refresh</a> <a href="#" id="updX" aria-label="Dismiss">✕</a>'; document.body.append(b);
+        $('#updGo', b).onclick = (ev) => { ev.preventDefault(); save(true); try { if (net) net.flush(); } catch (e) { /* ignore */ } setTimeout(() => location.reload(), 600); }; $('#updX', b).onclick = (ev) => { ev.preventDefault(); b.remove(); }; }
     } catch (e) { /* offline: try again later */ }
   }
   setInterval(() => { if (!document.hidden) checkVersion(); }, 120000);

@@ -182,33 +182,44 @@
 
     // ---------- rarities and sets (built-in ones can be edited too) ----------
     const NAME_RE = /^[A-Za-z0-9 ]+$/;
+    // Renaming: every place the config mentions a rarity / set by name is updated in the same save, so nothing is left pointing at the old name.
+    function renameRefs(cfg, kind, from, to) {
+      const key = kind === 'tier' ? 'tier' : 'cat';
+      Object.keys(cfg.edits).forEach((id) => { if (cfg.edits[id][key] === from) cfg.edits[id][key] = to; });
+      cfg.added.forEach((a) => { if (a[key] === from) a[key] = to; });
+      cfg.events.forEach((e) => { if (e.scope === kind && e.value === from) e.value = to; });
+      if (kind === 'tier') cfg.tiers.forEach((t) => { if (t.after === from) t.after = to; });
+      else cfg.setOrder = (cfg.setOrder || []).map((n) => (n === from ? to : n));
+    }
     function tierEditor(name) {
-      const builtin = name && G.TIER0.indexOf(name) >= 0, idx = name ? G.TIERS.indexOf(name) : -1;
+      const orig = name ? G.TIER_KEY[name] : null, builtin = !!orig && G.TIER0.indexOf(orig) >= 0, idx = name ? G.TIERS.indexOf(name) : -1;
       const cur = !name ? null : builtin ? { name: name, color: G.TIER_COLOR[name], pts: G.POINTS[idx], weight: G.BASE_WEIGHTS[idx] } : st().cfg.tiers.find((t) => t.name === name), isNew = !cur;
-      const def = builtin ? G.TIER_DEF[name] : null;
+      const def = builtin ? G.TIER_DEF[orig] : null;
       const bg = ctx.modal(`<h2>${isNew ? 'Add a rarity' : 'Edit ' + esc(name)}</h2>
-        <div class="row wrap"><label class="f">Name<input id="rtName" maxlength="14" value="${esc(cur ? cur.name : '')}" ${cur ? 'disabled' : ''} autocomplete="off"></label>
+        <div class="row wrap"><label class="f">Name<input id="rtName" maxlength="14" value="${esc(cur ? cur.name : '')}" autocomplete="off"></label>
         <label class="f">Colour<input id="rtColor" type="color" value="${cur ? cur.color : '#00e5c0'}"></label></div>
+        ${builtin && orig === 'Monster' ? '<p class="muted small">Every card in the Monster set always has this rarity.</p>' : ''}
         <div class="row wrap"><label class="f">Points per card<input id="rtPts" type="number" min="0" max="100000" value="${cur ? cur.pts : 10}"></label>
         <label class="f">Drop weight<input id="rtW" type="number" min="0" max="1000" step="0.01" value="${cur ? cur.weight : 1}"></label></div>
-        ${builtin ? `<p class="muted small">Default: ${def.pts} points, weight ${def.weight}, colour <span style="color:${def.color}">${def.color}</span>.</p>` : `<label class="f">Sits just above<select id="rtAfter">${opts(G.TIERS.filter((t) => t !== name), cur ? cur.after : G.TIERS[G.TIERS.length - 1])}</select></label>`}
-        <p class="muted small">Drop weight is relative to the others (Common 50, Rare 14, Epic 5, Legendary 2, Mythic 0.8, Sigma 0.08, Monster 0.05 by default; Rare and above are also cut by the game's luck setting). Setting it to 0 stops the whole rarity dropping. A rarity with no cards never drops. Points changes apply to everyone's score straight away.</p>
+        ${builtin ? `<p class="muted small">Default: ${orig !== name ? 'named ' + esc(orig) + ', ' : ''}${def.pts} points, weight ${def.weight}, colour <span style="color:${def.color}">${def.color}</span>.</p>` : `<label class="f">Sits just above<select id="rtAfter">${opts(G.TIERS.filter((t) => t !== name), cur ? cur.after : G.TIERS[G.TIERS.length - 1])}</select></label>`}
+        <p class="muted small">Renaming updates every card, power hour and setting that uses it. Drop weight is relative to the others (Common 50, Rare 14, Epic 5, Legendary 2, Mythic 0.8, Sigma 0.08, Monster 0.05 by default; Rare and above are also cut by the game's luck setting). Setting it to 0 stops the whole rarity dropping. A rarity with no cards never drops. Points changes apply to everyone's score straight away.</p>
         <div class="row wrap" style="margin-top:14px"><button class="btn primary" id="rtSave" type="button">${isNew ? 'Add rarity' : 'Save changes'}</button>${builtin ? '<button class="btn" id="rtReset" type="button">Reset to default</button>' : cur ? '<button class="btn danger" id="rtDel" type="button">Delete rarity</button>' : ''}<button class="btn" data-act="close-modal" type="button">Cancel</button></div>`);
       $('#rtSave', bg).onclick = guard(async () => {
         const n = $('#rtName', bg).value.replace(/\s+/g, ' ').trim();
         if (!n || !NAME_RE.test(n)) { toast('Use letters, numbers and spaces for the name', true); return; }
-        if (isNew && G.TIERS.some((t) => t.toLowerCase() === n.toLowerCase())) { toast('A rarity with that name already exists', true); return; }
+        const clash = G.TIERS.some((t) => t !== name && t.toLowerCase() === n.toLowerCase()) || G.TIER0.some((t) => t !== orig && t.toLowerCase() === n.toLowerCase());
+        if (clash) { toast('A rarity with that name already exists', true); return; }
         const color = $('#rtColor', bg).value, pts = Math.max(0, Math.round(+$('#rtPts', bg).value) || 0), weight = Math.max(0, +$('#rtW', bg).value || 0);
         if (builtin) {
-          const d = {}; if (color !== def.color) d.color = color; if (pts !== def.pts) d.pts = pts; if (Math.abs(weight - def.weight) > 1e-9) d.weight = weight;
-          await net.updateConfig((cfg) => { if (Object.keys(d).length) cfg.tierEdits[n] = d; else delete cfg.tierEdits[n]; });
+          const d = {}; if (n !== orig) d.name = n; if (color !== def.color) d.color = color; if (pts !== def.pts) d.pts = pts; if (Math.abs(weight - def.weight) > 1e-9) d.weight = weight;
+          await net.updateConfig((cfg) => { if (Object.keys(d).length) cfg.tierEdits[orig] = d; else delete cfg.tierEdits[orig]; if (n !== name) renameRefs(cfg, 'tier', name, n); }, n !== name ? `Renamed rarity ${name} to ${n}` : undefined);
         } else {
           const e = { name: n, color: color, pts: Math.max(1, pts), weight: Math.max(0.01, weight), after: $('#rtAfter', bg).value };
-          await net.updateConfig((cfg) => { const i = cfg.tiers.findIndex((t) => t.name === n); if (i >= 0) cfg.tiers[i] = e; else cfg.tiers.push(e); });
+          await net.updateConfig((cfg) => { if (!isNew && n !== name) renameRefs(cfg, 'tier', name, n); const i = cfg.tiers.findIndex((t) => t.name === (isNew ? n : name)); if (i >= 0) cfg.tiers[i] = e; else cfg.tiers.push(e); }, !isNew && n !== name ? `Renamed rarity ${name} to ${n}` : undefined);
         }
         ctx.closeModal(bg); toast('Rarity saved'); page();
       });
-      const rs = $('#rtReset', bg); if (rs) rs.onclick = guard(async () => { await net.updateConfig((cfg) => { delete cfg.tierEdits[name]; }); ctx.closeModal(bg); toast('Back to the default'); page(); });
+      const rs = $('#rtReset', bg); if (rs) rs.onclick = guard(async () => { await net.updateConfig((cfg) => { delete cfg.tierEdits[orig]; if (name !== orig) renameRefs(cfg, 'tier', name, orig); }); ctx.closeModal(bg); toast('Back to the default'); page(); });
       const dl = $('#rtDel', bg); if (dl) dl.onclick = guard(async () => {
         const used = G.CARDS.filter((c) => c.tier === name).length;
         if (used) { toast(`${used} card${used === 1 ? ' uses' : 's use'} this rarity. Move them to another rarity first.`, true); return; }
@@ -217,27 +228,28 @@
       });
     }
     function setEditor(name) {
-      const builtin = name && G.CAT_BASE.indexOf(name) >= 0, cur = !name ? null : builtin ? { name: name, hue: G.CATS[name].hue, blurb: G.CATS[name].blurb } : st().cfg.sets.find((t) => t.name === name), isNew = !cur;
+      const orig = name ? G.CAT_KEY[name] : null, builtin = !!orig && G.CAT_BASE.indexOf(orig) >= 0, cur = !name ? null : builtin ? { name: name, hue: G.CATS[name].hue, blurb: G.CATS[name].blurb } : st().cfg.sets.find((t) => t.name === name), isNew = !cur;
       const bg = ctx.modal(`<h2>${isNew ? 'Add a set' : 'Edit ' + esc(name)}</h2>
-        <div class="row wrap"><label class="f">Name<input id="stName" maxlength="12" value="${esc(cur ? cur.name : '')}" ${cur ? 'disabled' : ''} autocomplete="off"></label>
+        <div class="row wrap"><label class="f">Name<input id="stName" maxlength="12" value="${esc(cur ? cur.name : '')}" autocomplete="off"></label>
         <label class="f">Colour (hue)<input id="stHue" type="range" min="0" max="359" value="${cur ? cur.hue : 200}"></label></div>
         <label class="f">Description<input id="stBlurb" maxlength="90" value="${esc(cur ? cur.blurb : '')}" autocomplete="off"></label>
-        <p class="muted small">${builtin ? 'Built-in set: you can change its colour and description. Its name stays (saves refer to it).' : 'After adding a set, use "Add card" and pick it in the Set list, or edit an existing card to move it here.'}</p>
+        <p class="muted small">${isNew ? 'After adding a set, use "Add card" and pick it in the Set list, or edit an existing card to move it here.' : 'Renaming a set updates its cards everywhere. Card IDs and saved collections are not affected.'}</p>
         <div class="row wrap" style="margin-top:14px"><button class="btn primary" id="stSave" type="button">${isNew ? 'Add set' : 'Save changes'}</button>${builtin ? '<button class="btn" id="stReset" type="button">Reset to default</button>' : cur ? '<button class="btn danger" id="stDel" type="button">Delete set</button>' : ''}<button class="btn" data-act="close-modal" type="button">Cancel</button></div>`);
       $('#stSave', bg).onclick = guard(async () => {
         const n = $('#stName', bg).value.replace(/\s+/g, ' ').trim();
         if (!n || !NAME_RE.test(n)) { toast('Use letters, numbers and spaces for the name', true); return; }
-        if (isNew && Object.keys(G.CATS).some((k) => k.toLowerCase() === n.toLowerCase())) { toast('A set with that name already exists', true); return; }
-        const e = { name: n, hue: +$('#stHue', bg).value, blurb: $('#stBlurb', bg).value.trim() };
-        if (builtin) { const d = G.CAT_DEF[n], o = {}; if (e.hue !== d.hue) o.hue = e.hue; if (e.blurb !== d.blurb) o.blurb = e.blurb; await net.updateConfig((cfg) => { if (Object.keys(o).length) cfg.setEdits[n] = o; else delete cfg.setEdits[n]; }); }
-        else await net.updateConfig((cfg) => { cfg.sets = cfg.sets.filter((t) => t.name !== n); cfg.sets.push(e); });
+        const clash = Object.keys(G.CATS).some((k) => k !== name && k.toLowerCase() === n.toLowerCase()) || G.CAT_BASE.some((k) => k !== orig && k.toLowerCase() === n.toLowerCase());
+        if (clash) { toast('A set with that name already exists', true); return; }
+        const e = { name: n, hue: +$('#stHue', bg).value, blurb: $('#stBlurb', bg).value.trim() }, renamed = !isNew && n !== name;
+        if (builtin) { const d = G.CAT_DEF[orig], o = {}; if (n !== orig) o.name = n; if (e.hue !== d.hue) o.hue = e.hue; if (e.blurb !== d.blurb) o.blurb = e.blurb; await net.updateConfig((cfg) => { if (Object.keys(o).length) cfg.setEdits[orig] = o; else delete cfg.setEdits[orig]; if (renamed) renameRefs(cfg, 'set', name, n); }, renamed ? `Renamed set ${name} to ${n}` : undefined); }
+        else await net.updateConfig((cfg) => { if (renamed) renameRefs(cfg, 'set', name, n); cfg.sets = cfg.sets.filter((t) => t.name !== name && t.name !== n); cfg.sets.push(e); if (renamed) { cfg.sets.sort((a, b) => (a.name === n ? 1 : 0) - (b.name === n ? 1 : 0)); } }, renamed ? `Renamed set ${name} to ${n}` : undefined);
         ctx.closeModal(bg); toast('Set saved'); page();
       });
-      const rs = $('#stReset', bg); if (rs) rs.onclick = guard(async () => { await net.updateConfig((cfg) => { delete cfg.setEdits[name]; }); ctx.closeModal(bg); toast('Back to the default'); page(); });
+      const rs = $('#stReset', bg); if (rs) rs.onclick = guard(async () => { await net.updateConfig((cfg) => { delete cfg.setEdits[orig]; if (name !== orig) renameRefs(cfg, 'set', name, orig); }); ctx.closeModal(bg); toast('Back to the default'); page(); });
       const dl = $('#stDel', bg); if (dl) dl.onclick = guard(async () => {
         const used = G.CARDS.filter((c) => c.cat === name).length;
         if (used) { toast(`${used} card${used === 1 ? ' is' : 's are'} in this set. Move or delete them first.`, true); return; }
-        await net.updateConfig((cfg) => { cfg.sets = cfg.sets.filter((t) => t.name !== name); }); ctx.closeModal(bg); toast('Set deleted'); page();
+        await net.updateConfig((cfg) => { cfg.sets = cfg.sets.filter((t) => t.name !== name); cfg.setOrder = (cfg.setOrder || []).filter((x) => x !== name); }); ctx.closeModal(bg); toast('Set deleted'); page();
       });
     }
 
@@ -474,9 +486,51 @@
           <td>${c.pts}${c.ptsOv != null ? '*' : ''}</td><td>${c.wm !== 1 ? c.wm : '1'}</td><td>${c.off ? '-' : pct(r.mine)}</td><td>${pct(c.holoOv != null ? c.holoOv : G.DIFFS.sigma.holo)}${c.holoOv != null ? '*' : ''}</td>
           <td><button class="btn sm" type="button" data-ad-card="${esc(c.id)}">Edit</button></td></tr>`; }).join('')}</tbody></table></div>`;
     }
-    const TABS = [['home', 'Overview'], ['players', 'Players'], ['cards', 'Cards'], ['game', 'Rarities & sets'], ['codes', 'Codes & scoring'], ['activity', 'Activity']];
-    const TABOF = { overview: 'home', power: 'home', accounts: 'players', cards: 'cards', announce: 'home', activity: 'activity', tiers: 'game', sets: 'game', codes: 'codes', scoring: 'codes' };
+    const pendingAccts = () => st().accounts.filter((a) => !G.isApproved(a)), pendingImgs = () => st().imgreqs.filter((r) => r.status === 'pending');
+    const TABS = [['home', 'Overview'], ['players', 'Players'], ['cards', 'Cards'], ['game', 'Rarities & sets'], ['codes', 'Codes & scoring'], ['images', 'Image requests'], ['activity', 'Activity']];
+    const TABOF = { overview: 'home', power: 'home', accounts: 'players', cards: 'cards', announce: 'home', activity: 'activity', images: 'images', tiers: 'game', sets: 'game', codes: 'codes', scoring: 'codes' };
     const det = (key, title, body, extra) => (TABOF[key] !== view.tab ? '' : `<section class="panel ad-sec" data-sec="${key}"><header class="ad-head"><h2>${title}</h2>${extra || ''}</header><div class="ad-body">${body}</div></section>`);
+    // Approve = the picture becomes the card's picture for everyone; the requester is told on their next sync and closes the request.
+    async function reviewImage(id, ok) {
+      const r = st().imgreqs.find((x) => x.id === id); if (!r) throw new Error('Request not found');
+      if (ok) { if (!r.img || !G.BYID[r.card]) throw new Error('That card or picture is no longer valid'); await net.saveCardImage(r.card, r.img); }
+      const cur = await net.gh('GET', `/repos/${net.conf().repo}/issues/${r.num}`); let b; try { b = JSON.parse(cur.body); } catch (e) { throw new Error('Request is unreadable'); }
+      b.status = ok ? 'approved' : 'rejected'; await net.gh('PATCH', `/repos/${net.conf().repo}/issues/${r.num}`, { body: JSON.stringify(b) });
+      net.log((ok ? 'Approved' : 'Rejected') + ' a card image for ' + (G.BYID[r.card] ? G.BYID[r.card].name : r.card) + ' from ' + r.name).catch(() => {});
+      await net.refresh(); toast(ok ? 'Picture approved and live' : 'Request rejected');
+    }
+    // Drag the handles (mouse, touch or pen) or use the arrow keys on a focused handle; the new order is saved when you let go.
+    function bindSetDrag() {
+      const list = $('#adSetList'); if (!list) return;
+      const names = () => $$('.drag-row', list).map((r) => r.dataset.set);
+      const save = guard(async () => { const order = names(); await net.updateConfig((c) => { c.setOrder = order; }, 'Changed the set order'); toast('Set order saved'); page(); });
+      let drag = null;
+      list.addEventListener('pointerdown', (e) => {
+        const h = e.target.closest('.drag-h'); if (!h) return; e.preventDefault();
+        const row = h.closest('.drag-row'); drag = { row: row, id: e.pointerId }; row.classList.add('dragging'); try { h.setPointerCapture(e.pointerId); } catch (er) { /* ignore */ }
+      });
+      list.addEventListener('pointermove', (e) => {
+        if (!drag) return; if (e.clientY < 90) window.scrollBy(0, -14); else if (e.clientY > innerHeight - 90) window.scrollBy(0, 14); // long lists scroll while you drag const el = document.elementFromPoint(e.clientX, e.clientY), over = el && el.closest ? el.closest('.drag-row') : null;
+        $$('.drop-before,.drop-after', list).forEach((r) => r.classList.remove('drop-before', 'drop-after'));
+        if (over && over !== drag.row && list.contains(over)) { const r = over.getBoundingClientRect(), before = e.clientY < r.top + r.height / 2; over.classList.add(before ? 'drop-before' : 'drop-after'); drag.over = over; drag.before = before; } else drag.over = null;
+      });
+      const end = () => {
+        if (!drag) return; const d = drag; drag = null; d.row.classList.remove('dragging'); $$('.drop-before,.drop-after', list).forEach((r) => r.classList.remove('drop-before', 'drop-after'));
+        if (d.over) { list.insertBefore(d.row, d.before ? d.over : d.over.nextSibling); save(); }
+      };
+      list.addEventListener('pointerup', end); list.addEventListener('pointercancel', end);
+      list.addEventListener('keydown', (e) => {
+        const h = e.target.closest('.drag-h'); if (!h || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return; e.preventDefault();
+        const row = h.closest('.drag-row'), sib = e.key === 'ArrowUp' ? row.previousElementSibling : row.nextElementSibling; if (!sib) return;
+        list.insertBefore(row, e.key === 'ArrowUp' ? sib : sib.nextSibling); h.focus(); clearTimeout(bindSetDrag.t); bindSetDrag.t = setTimeout(save, 900);
+      });
+    }
+    // The two original codes used to live in the game files. They are moved into the editable list once, so they can be removed like any other.
+    function seedCodes() {
+      const cfg = st().cfg; if (cfg.codesSeeded || view.seeding) return; view.seeding = true;
+      net.updateConfig((c) => { c.codesSeeded = true; Object.keys(G.DEFAULT_CODES).forEach((k) => { const w = k.toUpperCase(); if (!c.codes.some((x) => x.code === w)) c.codes.push({ code: w, packs: G.DEFAULT_CODES[k].packs || 0, cards: G.DEFAULT_CODES[k].cards || [], note: G.DEFAULT_CODES[k].note || '', off: false, max: 0, until: 0 }); }); }, 'Moved the built-in pack codes into the editable list')
+        .then(() => { view.seeding = false; if (location.hash === '#admin') page(); }).catch(() => { view.seeding = false; });
+    }
     function page() {
       if (!unlocked()) { toast('Log in as admin in Settings first', true); location.hash = '#options'; return; }
       if (!net.enabled()) { $('#main').innerHTML = '<h1>Admin</h1><div class="panel"><p class="muted">The online connection is not set up, so there is nothing to manage.</p></div>'; return; }
@@ -487,20 +541,20 @@
       const row = (a) => {
         const p = byPid[a.pid], off = isBlocked(a.pid);
         const info = p ? `${ctx.fmt(p.score)} pts · ${p.unique} cards · ${p.opened} packs` : 'Nothing saved online yet';
-        return `<div class="ad-row" data-u="${esc((a.u + ' ' + (p ? p.name : '')).toLowerCase())}">${p ? ctx.avatarHTML(34, p) : ''}<span class="ad-main"><b>${esc(a.u)}</b>${p && p.name !== a.u ? ` <small class="muted">(${esc(p.name)})</small>` : ''}<small class="muted">${info}${off ? ' · <b>removed from leaderboard</b>' : ''}</small></span>
-          <span class="ad-btns"><button class="btn sm primary" data-ad-give="${esc(a.k)}" type="button">Give</button>
-          <details class="ad-menu"><summary class="btn sm" aria-label="More actions">⋯</summary><div class="ad-pop"><button type="button" data-ad-take="${esc(a.k)}">Take cards…</button><button type="button" data-ad-stats="${esc(a.k)}">Edit packs opened…</button>
+        return `<div class="ad-row" data-u="${esc((a.u + ' ' + (p ? p.name : '')).toLowerCase())}">${p ? ctx.avatarHTML(34, p) : ''}<span class="ad-main"><b>${esc(a.u)}</b>${p && p.name !== a.u ? ` <small class="muted">(${esc(p.name)})</small>` : ''}<small class="muted">${info}${off ? ' · <b>removed from leaderboard</b>' : ''}${G.isApproved(a) ? '' : ' · <b>⏳ waiting for approval</b>'}</small></span>
+          <span class="ad-btns">${G.isApproved(a) ? '' : `<button class="btn sm primary" data-ad-appr="${esc(a.k)}" type="button">Approve</button>`}<button class="btn sm ${G.isApproved(a) ? 'primary' : ''}" data-ad-give="${esc(a.k)}" type="button">Give</button>
+          <details class="ad-menu"><summary class="btn sm" aria-label="More actions">⋯</summary><div class="ad-pop">${G.isApproved(a) ? `<button type="button" data-ad-revoke="${esc(a.k)}">Revoke access</button>` : ''}<button type="button" data-ad-take="${esc(a.k)}">Take cards…</button><button type="button" data-ad-stats="${esc(a.k)}">Edit packs opened…</button>
           ${off ? `<button type="button" data-ad-restore="${esc(a.pid)}">Restore to leaderboard</button>` : `<button type="button" data-ad-rm="${esc(a.pid)}" data-name="${esc(a.u)}">Remove from leaderboard</button>`}
           <button type="button" class="danger" data-ad-acc="${esc(a.k)}">Delete account</button></div></details></span></div>`;
       };
-      const tierRows = G.TIERS.map((t) => { const c = cfg.tiers.find((x) => x.name === t), i = G.TIERS.indexOf(t), d = G.TIER_DEF[t], ed = d && cfg.tierEdits[t]; return `<div class="ad-row"><span class="ad-main"><b style="color:${esc(G.TIER_COLOR[t])}">${esc(t)}</b> <small class="muted">${G.POINTS[i]} pts · weight ${G.BASE_WEIGHTS[i]} · ${G.CARDS.filter((x) => x.tier === t).length} cards${c ? ' · custom' : ''}${ed ? ' · edited' : ''}</small></span><button class="btn sm" data-ad-tier="${esc(t)}" type="button">Edit</button></div>`; }).join('');
-      const setRows = Object.keys(G.CATS).map((k) => { const c = cfg.sets.find((x) => x.name === k), ed = cfg.setEdits[k]; return `<div class="ad-row"><span class="ad-main"><b style="color:hsl(${G.CATS[k].hue},70%,62%)">${esc(k)}</b> <small class="muted">${G.CARDS.filter((x) => x.cat === k).length} cards${c ? ' · custom' : ''}${ed ? ' · edited' : ''}</small></span><button class="btn sm" data-ad-set="${esc(k)}" type="button">Edit</button></div>`; }).join('');
+      const tierRows = G.TIERS.map((t) => { const c = cfg.tiers.find((x) => x.name === t), i = G.TIERS.indexOf(t), d = G.TIER_DEF[G.TIER_KEY[t]], ed = d && cfg.tierEdits[G.TIER_KEY[t]]; return `<div class="ad-row"><span class="ad-main"><b style="color:${esc(G.TIER_COLOR[t])}">${esc(t)}</b> <small class="muted">${G.POINTS[i]} pts · weight ${G.BASE_WEIGHTS[i]} · ${G.CARDS.filter((x) => x.tier === t).length} cards${c ? ' · custom' : ''}${ed ? ' · edited' : ''}</small></span><button class="btn sm" data-ad-tier="${esc(t)}" type="button">Edit</button></div>`; }).join('');
+      const setRows = Object.keys(G.CATS).map((k) => { const c = cfg.sets.find((x) => x.name === k), ed = cfg.setEdits[G.CAT_KEY[k]]; return `<div class="ad-row drag-row" data-set="${esc(k)}"><button type="button" class="drag-h" data-drag="${esc(k)}" aria-label="Drag to move ${esc(k)} (or press the up and down arrow keys)" title="Drag to reorder">⋮⋮</button><span class="ad-main"><b style="color:hsl(${G.CATS[k].hue},70%,62%)">${esc(k)}</b> <small class="muted">${G.CARDS.filter((x) => x.cat === k).length} cards${c ? ' · custom' : ''}${ed ? ' · edited' : ''}</small></span><button class="btn sm" data-ad-set="${esc(k)}" type="button">Edit</button></div>`; }).join('');
       const evs = cfg.events.slice().sort((a, b) => b.end - a.end), live = evs.filter((e) => e.start <= now && e.end > now), soon = evs.filter((e) => e.start > now), past = evs.filter((e) => e.end <= now);
       const evRow = (e, tag) => `<div class="ad-row ${tag === 'past' ? 'dim' : ''}"><span class="ad-main"><b>${esc(e.name)}</b> <small class="muted">${esc(evText(e))}${e.kind === 'weight' && e.scope === 'all' ? ' · <b>no effect: every card is boosted equally</b>' : ''}</small><small class="muted">${tag === 'live' ? '⚡ running · ' + fmtLeft(e.end - now) + ' left' : tag === 'soon' ? 'starts in ' + fmtLeft(e.start - now) + ' · lasts ' + fmtLeft(e.end - e.start) : 'ended'}</small></span><button class="btn sm ${tag === 'live' ? 'danger' : ''}" data-ad-evx="${esc(e.id)}" type="button">${tag === 'live' ? 'End now' : tag === 'soon' ? 'Cancel' : 'Remove'}</button></div>`;
       const totalPacks = dir.reduce((a, p) => a + (p.opened || 0), 0), totalCards = dir.reduce((a, p) => a + Object.keys(p.cards).reduce((x, k) => x + p.cards[k].n, 0), 0), top = dir.slice().sort((a, b) => b.score - a.score)[0];
       const hasUndo = (() => { try { return !!localStorage.getItem('ss-gacha-cfg-undo'); } catch (e) { return false; } })();
       $('#main').innerHTML = `<div class="row wrap between ad-top"><h1>Admin</h1><div class="row"><button class="btn sm" id="adSync" type="button">↻ Refresh</button><button class="btn sm" id="adOut" type="button">Log out</button></div></div>
-        <nav class="ad-tabs" aria-label="Admin sections">${TABS.map(([k, l]) => `<button type="button" data-ad-tab="${k}" ${view.tab === k ? 'aria-current="page"' : ''}>${l}</button>`).join('')}</nav>
+        <nav class="ad-tabs" aria-label="Admin sections">${TABS.map(([k, l]) => { const n = k === 'players' ? pendingAccts().length : k === 'images' ? pendingImgs().length : 0; return `<button type="button" data-ad-tab="${k}" ${view.tab === k ? 'aria-current="page"' : ''}>${l}${n ? ` <span class="fr-unread">${n}</span>` : ''}</button>`; }).join('')}</nav>
         ${det('overview', 'Overview', `<div class="facts ad-facts"><div><b>${accounts.length}</b><span>accounts</span></div><div><b>${dir.length}</b><span>players with a save</span></div><div><b>${ctx.fmt(totalPacks)}</b><span>packs opened</span></div><div><b>${ctx.fmt(totalCards)}</b><span>cards held</span></div><div><b>${top ? esc(top.name) : '-'}</b><span>top score ${top ? ctx.fmt(top.score) : ''}</span></div></div>
           <div class="row wrap" style="margin-top:12px"><button class="btn" id="adUndo" type="button" ${hasUndo ? '' : 'disabled'} title="Puts the game settings back how they were before your last change">↶ Undo last change</button><button class="btn" id="adExport" type="button">⬇ Back up settings</button><label class="btn" style="cursor:pointer">⬆ Restore backup<input id="adImport" type="file" accept="application/json,.json" hidden></label></div>
           <p class="muted small">A backup holds every card edit, custom card, rarity, set and power hour (not pictures or accounts).</p>`)}
@@ -509,16 +563,17 @@
           ${past.length ? `<details class="ad-past"><summary class="muted small">Ended (${past.length})</summary><div class="ad-list">${past.map((e) => evRow(e, 'past')).join('')}</div></details>` : ''}`, '<button class="btn primary sm" id="adPower" type="button">＋ Start power hour</button>')}
         ${det('announce', 'Announcements 📣', `<p class="muted small">A banner at the top of every page for everyone. Players can dismiss it.</p>${cfg.announce.length ? `<div class="ad-list">${cfg.announce.map((a) => `<div class="ad-row"><span class="ad-main"><b>${esc(a.text)}</b><small class="muted">${a.kind}${a.until ? ' · ' + (a.until > now ? fmtLeft(a.until - now) + ' left' : 'ended') : ' · until you remove it'}</small></span><button class="btn sm danger" data-ad-annx="${esc(a.id)}" type="button">Remove</button></div>`).join('')}</div>` : '<p class="muted small">No announcements.</p>'}`, '<button class="btn primary sm" id="adAnn" type="button">＋ New announcement</button>')}
         ${det('activity', 'Activity log', `<p class="muted small">Admin changes, gifts and code redemptions, newest first (the last ~100 admin actions are kept).</p><label class="f"><input id="adLogQ" type="search" placeholder="Filter the log" autocomplete="off"></label><div class="ad-list" id="adLog">${(() => { const rows = cfg.log.map((l) => ({ at: l.at, text: l.text, who: 'Admin' })).concat(st().redeems.map((r) => ({ at: r.at, text: r.name + ' redeemed ' + r.code, who: 'Player' }))).sort((a, b) => b.at - a.at).slice(0, 200); return rows.length ? rows.map((r) => `<div class="ad-row" data-t="${esc(r.text.toLowerCase())}"><span class="ad-main">${esc(r.text)}<small class="muted">${r.who} · ${r.at ? new Date(r.at).toLocaleString('en-GB') : ''}</small></span></div>`).join('') : '<div class="empty"><p>Nothing yet.</p></div>'; })()}</div>`)}
-        ${det('accounts', `Accounts <span class="muted small">${accounts.length}</span>`, `<p class="muted small">Every account is its own leaderboard entry.</p>
+        ${det('accounts', `Accounts <span class="muted small">${accounts.length}</span>`, `${pendingAccts().length ? `<div class="panel" style="border-color:var(--accent)"><h3>⏳ Waiting for approval <span class="muted small">${pendingAccts().length}</span></h3><p class="muted small">These accounts were made after the whitelist started. They cannot open the site until you approve them. Rejecting deletes the account.</p><div class="ad-list">${pendingAccts().map((a) => `<div class="ad-row"><span class="ad-main"><b>${esc(a.u)}</b><small class="muted">Discord ID ${esc(a.did)} · created ${a.created ? new Date(a.created).toLocaleString('en-GB') : 'unknown'}</small></span><span class="ad-btns"><button class="btn sm primary" data-ad-appr="${esc(a.k)}" type="button">Approve</button><button class="btn sm danger" data-ad-acc="${esc(a.k)}" type="button">Reject</button></span></div>`).join('')}</div></div>` : '<p class="muted small">No accounts are waiting for approval.</p>'}<p class="muted small">Every account is its own leaderboard entry. New accounts need your approval before they can play; accounts made before the whitelist existed were let in automatically (use "Revoke access" in the ⋯ menu to remove one).</p>
           <div class="row wrap"><label class="f grow"><input id="adAcctQ" type="search" placeholder="Find an account" autocomplete="off"></label><button class="btn" id="adGiveAll" type="button">🎁 Give to everyone</button></div>
           ${accounts.length ? `<div class="ad-list" id="adAcctList">${accounts.map(row).join('')}</div>` : '<div class="empty"><p>No accounts yet.</p></div>'}
           ${blocked.length ? `<div class="row wrap between" style="margin-top:16px"><h3>Removed from the leaderboard <span class="muted small">${blocked.length}</span></h3><button class="btn sm" id="adRestoreAll" type="button">Restore all</button></div><div class="ad-list">${blocked.map((x) => { const a = acctOf(x.id); return `<div class="ad-row"><span class="ad-main"><b>${esc(a ? a.u : x.name)}</b>${a ? '' : ' <small class="muted">(no account)</small>'}</span><button class="btn sm" data-ad-restore="${esc(x.id)}" type="button">Restore</button></div>`; }).join('')}</div>` : ''}
           ${orphans.length ? `<h3 style="margin:16px 0 8px">Old players with no account <span class="muted small">${orphans.length}</span></h3><p class="muted small">Hidden from the leaderboard because they have no Discord account. The cleanup script in tools/ can close them.</p><div class="ad-list">${orphans.map((p) => `<div class="ad-row">${ctx.avatarHTML(34, p)}<span class="ad-main"><b>${esc(p.name)}</b><small class="muted">${ctx.fmt(p.score)} pts · ${p.unique} cards</small></span>${isBlocked(p.id) ? '' : `<button class="btn sm danger" data-ad-rm="${esc(p.id)}" data-name="${esc(p.name)}" type="button">Remove</button>`}</div>`).join('')}</div>` : ''}`)}
         ${det('tiers', `Rarities <span class="muted small">${G.TIERS.length}</span>`, `<p class="muted small">Edit any rarity: colour, points and how often it drops. Built-in ones can be reset.</p><div class="ad-list">${tierRows}</div>`, '<button class="btn primary sm" id="adAddTier" type="button">＋ Add rarity</button>')}
-        ${det('sets', `Sets <span class="muted small">${Object.keys(G.CATS).length}</span>`, `<div class="ad-list">${setRows}</div>`, '<button class="btn primary sm" id="adAddSet" type="button">＋ Add set</button>')}
-        ${det('codes', `Pack codes <span class="muted small">${cfg.codes.length}</span>`, `<p class="muted small">Players type these in the 🎁 Code box. Each works once per save. Codes written in the game files still work too.</p>
+        ${det('sets', `Sets <span class="muted small">${Object.keys(G.CATS).length}</span>`, `<p class="muted small">Drag the ⋮⋮ handle to change the order sets are shown in the Index (and in set pickers). Keyboard: focus a handle and press the up or down arrow.</p><div class="ad-list" id="adSetList">${setRows}</div>`, '<button class="btn primary sm" id="adAddSet" type="button">＋ Add set</button>')}
+        ${det('codes', `Pack codes <span class="muted small">${cfg.codes.length}</span>`, `<p class="muted small">Players type these in the 🎁 Code box. Each works once per save. Delete a code to stop it working.</p>
           ${cfg.codes.length ? `<div class="ad-list">${cfg.codes.map((c) => `<div class="ad-row ${c.off ? 'dim' : ''}"><span class="ad-main"><b class="mono">${esc(c.code)}</b>${c.off ? ' <small class="ad-tag inl">off</small>' : ''}<small class="muted">${c.packs ? c.packs + ' pack' + (c.packs === 1 ? '' : 's') : ''}${c.packs && c.cards.length ? ' + ' : ''}${c.cards.length ? c.cards.map((id) => esc(G.BYID[id] ? G.BYID[id].name : id)).join(', ') : ''}${c.note ? ' · ' + esc(c.note) : ''}</small><small class="muted">used ${net.state.redeems.filter((r) => r.code === c.code).length}${c.max ? ' / ' + c.max : ''}${c.until ? (c.until > now ? ' · expires in ' + fmtLeft(c.until - now) : ' · <b>expired</b>') : ''}</small></span><button class="btn sm" data-ad-code="${esc(c.code)}" type="button">Edit</button></div>`).join('')}</div>` : '<div class="empty"><p>No codes yet.</p></div>'}`, '<button class="btn primary sm" id="adAddCode" type="button">＋ New code</button>')}
         ${det('scoring', 'Scoring', `<p class="muted small">Every copy of a card counts towards a player's score. A skibidi copy is worth this many times a normal copy.</p><div class="row wrap"><label class="f">Skibidi points multiplier<input id="adHoloMult" type="number" min="1" max="20" step="0.25" value="${G.GS.holoMult}"></label><button class="btn primary" id="adSaveScoring" type="button">Save</button></div>`)}
+        ${det('images', `Card image requests <span class="muted small">${pendingImgs().length}</span>`, `<p class="muted small">Pictures players sent in from Settings > Request a card image. Approving puts the picture on that card for everyone.</p>${pendingImgs().length ? `<div class="ad-list">${pendingImgs().sort((a, b) => a.at - b.at).map((r) => { const c = G.BYID[r.card]; return `<div class="ad-row" style="align-items:flex-start;gap:16px;flex-wrap:wrap"><span>${c ? ctx.cardHTML(Object.assign({}, c, { img: r.img || c.img }), { size: 130 }) : '<span class="muted">card removed</span>'}</span><span class="ad-main"><b>${esc(c ? c.name : r.card)}</b><small class="muted">from ${esc(r.name)} · ${ctx.since(r.at)}</small>${r.note ? `<small>“${esc(r.note)}”</small>` : ''}<small class="muted">Current picture: ${c && c.img ? 'custom' : 'generated art'}</small></span><span class="ad-btns"><button class="btn sm primary" data-ad-imgok="${esc(r.id)}" type="button" ${c && r.img ? '' : 'disabled'}>Approve</button><button class="btn sm danger" data-ad-imgno="${esc(r.id)}" type="button">Reject</button></span></div>`; }).join('')}</div>` : '<div class="empty"><p>No requests right now.</p></div>'}`)}
         ${det('cards', `Cards <span class="muted small">${G.CARDS.length}</span>`, `<div class="filters"><label class="f">Search<input id="adQ" type="search" value="${esc(view.q)}" placeholder="Card name" autocomplete="off"></label>
           <label class="f">Set<select id="adCat"><option value="">All sets</option>${Object.keys(G.CATS).map((k) => `<option value="${esc(k)}" ${view.cat === k ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select></label>
           <label class="f">Rarity<select id="adTier"><option value="">All rarities</option>${G.TIERS.map((k) => `<option value="${esc(k)}" ${view.tier === k ? 'selected' : ''}>${esc(k)}</option>`).join('')}</select></label>
@@ -526,6 +581,7 @@
           <label class="f">View<select id="adMode"><option value="list" ${view.mode === 'list' ? 'selected' : ''}>List (edit inline)</option><option value="grid" ${view.mode === 'grid' ? 'selected' : ''}>Pictures</option></select></label></div>
           <div class="ad-bulk" id="adBulk"></div>
           <div id="adCards">${cardsHTML()}</div>`, '<button class="btn primary sm" id="adAdd" type="button">＋ Add card</button>')}`;
+      bindSetDrag(); seedCodes();
       const $q = (x) => $(x) || document.createElement('div');
       const bulkBar = () => {
         const n = sel.size, vis = visibleCards();
@@ -578,8 +634,11 @@
         const inl = e.target.closest('[data-inl]'); if (inl) { const [id, what] = inl.dataset.inl.split('|'), keep = new Set(sel); sel.clear(); sel.add(id); Promise.resolve(bulk(what, inl.value)).then(() => { keep.forEach((x) => sel.add(x)); }); }
       };
       $('#main').onclick = (e) => {
-        const t = e.target.closest('[data-ad-card],[data-ad-rm],[data-ad-restore],[data-ad-acc],[data-ad-give],[data-ad-take],[data-ad-stats],[data-ad-tier],[data-ad-set],[data-ad-evx],[data-ad-tab],[data-ad-code],[data-ad-annx]'); if (!t) return;
+        const t = e.target.closest('[data-ad-card],[data-ad-rm],[data-ad-restore],[data-ad-acc],[data-ad-give],[data-ad-take],[data-ad-stats],[data-ad-tier],[data-ad-set],[data-ad-evx],[data-ad-tab],[data-ad-code],[data-ad-annx],[data-ad-appr],[data-ad-revoke],[data-ad-imgok],[data-ad-imgno]'); if (!t) return;
         if (t.dataset.adAnnx) { const id = t.dataset.adAnnx; guard(async () => { await net.updateConfig((c) => { c.announce = c.announce.filter((x) => x.id !== id); }, 'Removed an announcement'); toast('Removed'); page(); })(); return; }
+        if (t.dataset.adAppr) { const k = t.dataset.adAppr, a = accounts.find((x) => x.k === k); guard(async () => { await net.updateConfig((c) => { c.revoked = c.revoked.filter((x) => x !== k); if (c.approved.indexOf(k) < 0) c.approved.push(k); }, 'Approved ' + (a ? a.u : k)); toast('Approved. They can play now.'); page(); })(); return; }
+        if (t.dataset.adRevoke) { const k = t.dataset.adRevoke, a = accounts.find((x) => x.k === k); if (!window.confirm('Take away access for ' + (a ? a.u : k) + '? They will see the waiting-for-approval page.')) return; guard(async () => { await net.updateConfig((c) => { c.approved = c.approved.filter((x) => x !== k); if (c.revoked.indexOf(k) < 0) c.revoked.push(k); }, 'Revoked access for ' + (a ? a.u : k)); toast('Access removed'); page(); })(); return; }
+        if (t.dataset.adImgok || t.dataset.adImgno) { const ok = !!t.dataset.adImgok, id = t.dataset.adImgok || t.dataset.adImgno; guard(async () => { await reviewImage(id, ok); page(); })(); return; }
         if (t.dataset.adTab) { view.tab = t.dataset.adTab; page(); return; }
         if (t.dataset.adCode) { codeModal(t.dataset.adCode); return; }
         { const m = t.closest('details.ad-menu'); if (m) m.open = false; }
