@@ -1,8 +1,8 @@
 // Card data, tiers, difficulties. Everything is defined here so you can balance the game from one file.
 (function () {
-  const TIERS = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary', 'Mythic', 'Sigma', 'Monster'];
+  const TIERS = ['Common', 'Uncommon', 'Rare', 'Epic', 'Legendary', 'Mythic', 'Sigma', 'Monster', 'Good Luck'];
   const TIER0 = TIERS.slice(); // the built-in rarities; the admin can add more between them (see rebuild)
-  const TIER_COLOR = { Common: '#8b97a3', Uncommon: '#4cc38a', Rare: '#4aa3ff', Epic: '#b36bff', Legendary: '#ffb02e', Mythic: '#ff4d6d', Sigma: '#ffffff', Monster: '#34f5a0' };
+  const TIER_COLOR = { Common: '#8b97a3', Uncommon: '#4cc38a', Rare: '#4aa3ff', Epic: '#b36bff', Legendary: '#ffb02e', Mythic: '#ff4d6d', Sigma: '#ffffff', Monster: '#34f5a0', 'Good Luck': '#ffe14d' };
 
   // Your roster, exactly as supplied: category header lines, then "Name Rarity" per line.
   const RAW = `SS
@@ -156,6 +156,7 @@ Ess Ess Gee Monster`;
     EXTRA: { hue: 200, name: 'EXTRA', blurb: 'Odds and ends. Hard to find.' },
     ROTA:  { hue: 318,  name: 'ROTA',  blurb: 'Robots, rabbits and rare machines.' },
     HORROR: { hue: 96,  name: 'HORROR', blurb: 'The Horror Skunx crew.' },
+    'Goofy Silly': { hue: 52, name: 'Goofy Silly', blurb: 'Cursed sigmas. Good luck finding them.' },
     MONSTER: { hue: 135, name: 'MONSTER', blurb: 'Only drops while the monster is let in (Settings).', monster: true }
   };
 
@@ -169,11 +170,13 @@ Ess Ess Gee Monster`;
   function rng(seed) { let a = seed; return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 
   // Points each card is worth, by tier. A player's score is the sum over every copy they own (skibidi copies count extra).
-  const POINTS = [1, 3, 8, 20, 50, 125, 400, 600];
-  const W0 = [50, 28, 14, 5, 2, 0.8, 0.08, 0.05], P0 = POINTS.slice(), C0 = Object.assign({}, TIER_COLOR);
+  // Score overhaul (v30): Common 10, Uncommon 30, Rare 100, Epic 300, Legendary 1000, Mythic 3000, Sigma 5000, Monster 6000, Good Luck 10000.
+  const POINTS = [10, 30, 100, 300, 1000, 3000, 5000, 6000, 10000];
+  // Good Luck: each card is 10x rarer than a Monster card (0.05 / 4 monster cards = 0.0125 each, so 0.00125 each; 7 Good Luck cards = 0.00875).
+  const W0 = [50, 28, 14, 5, 2, 0.8, 0.08, 0.05, 0.00875], P0 = POINTS.slice(), C0 = Object.assign({}, TIER_COLOR);
   const TIER_DEF = {}; TIER0.forEach(function (n, i) { TIER_DEF[n] = { color: C0[n], pts: P0[i], weight: W0[i] }; });
   // Game-wide settings the admin can change. holoMult: a skibidi (holo) copy is worth this many times a normal copy's points.
-  const GS = { holoMult: 2 };
+  const GS = { holoMult: 3 };
   // Collection score. The Nth copy of a card is worth 1/N of the first copy (so a 3rd copy is worth a third). Skibidi copies are counted first
   // and are worth holoMult times as much. Harmonic sums are cached because scores are worked out for every player.
   const HARM = [0];
@@ -182,7 +185,7 @@ Ess Ess Gee Monster`;
   // What the k-th copy (1 = first) of a card is worth, skibidi or not.
   function copyValue(c, k, holo) { return c.pts * (holo ? GS.holoMult : 1) / Math.max(1, k); }
   function scoreOf(cards) { let t = 0; Object.keys(cards).forEach(function (id) { const c = BYID[id], e = cards[id]; if (c && e && e.n > 0) t += cardScore(c, e); }); return Math.round(t); }
-  const TIER_FX = [0, 1, 2, 3, 4, 5, 6, 7]; // how fancy the reveal is (built-ins: their own index; custom rarities sit half a step above the one they follow)
+  const TIER_FX = [0, 1, 2, 3, 4, 5, 6, 7, 8]; // how fancy the reveal is (built-ins: their own index; custom rarities sit half a step above the one they follow)
   // Base chance weight of each tier for one card slot, before a difficulty's luck is applied to Rare and above.
   const BASE_WEIGHTS = W0.slice();
 
@@ -220,7 +223,7 @@ Ess Ess Gee Monster`;
   // Admin config (stored online by the admin page): { blocked: [{id,name}], edits: { cardId: {name,tier,cat} }, added: [{id,name,cat,tier}] }
   const isObj = function (x) { return x && typeof x === 'object' && !Array.isArray(x); };
   function cleanConfig(b) {
-    const o = { blocked: [], edits: {}, added: [], tiers: [], sets: [], tierEdits: {}, setEdits: {}, setOrder: [], codesSeeded: false, approved: [], revoked: [], events: [], codes: [], announce: [], log: [], settings: { holoMult: 2 } };
+    const o = { blocked: [], edits: {}, added: [], tiers: [], sets: [], tierEdits: {}, setEdits: {}, setOrder: [], codesSeeded: false, approved: [], revoked: [], removed: [], events: [], codes: [], announce: [], log: [], settings: { holoMult: 3 }, feedClear: { pulls: 0, trades: 0 }, resetAll: 0, resets: {} };
     if (!isObj(b)) return o;
     const nmOk = function (v, n) { v = String(v == null ? '' : v).replace(/\s+/g, ' ').trim(); return v.length >= 1 && v.length <= n && /^[A-Za-z0-9 ]+$/.test(v) ? v : null; };
     // Built-in rarities and sets can be renamed (tierEdits[name].name / setEdits[name].name). Everything else in the config may refer to a
@@ -265,8 +268,14 @@ Ess Ess Gee Monster`;
     // Order the sets are shown in (names; any set missing from the list follows in its default order).
     if (Array.isArray(b.setOrder)) b.setOrder.slice(0, 80).forEach(function (x) { const n = normC(String(x)); if (catNames.indexOf(n) >= 0 && o.setOrder.indexOf(n) < 0) o.setOrder.push(n); });
     o.codesSeeded = !!b.codesSeeded;
+    // Built-in cards the admin deleted (their ids; a deleted card can be restored). Custom cards are deleted by removing them from 'added'.
+    if (Array.isArray(b.removed)) b.removed.slice(0, 600).forEach(function (x) { x = String(x); if (BASE_IDS[x] && o.removed.indexOf(x) < 0) o.removed.push(x); });
+    // Admin 'clear' buttons for the home page feeds (entries older than the stamp are hidden) and progress resets (see app.js checkReset).
+    if (isObj(b.feedClear)) ['pulls', 'trades'].forEach(function (k) { o.feedClear[k] = Math.max(0, +b.feedClear[k] || 0); });
+    o.resetAll = Math.max(0, +b.resetAll || 0);
+    if (isObj(b.resets)) Object.keys(b.resets).slice(0, 3000).forEach(function (k) { if (/^d\d{15,19}$/.test(k) && +b.resets[k] > 0) o.resets[k] = +b.resets[k]; });
     ['approved', 'revoked'].forEach(function (k) { if (Array.isArray(b[k])) b[k].slice(0, 3000).forEach(function (x) { x = String(x); if (/^d\d{15,19}$/.test(x) && o[k].indexOf(x) < 0) o[k].push(x); }); });
-    if (isObj(b.settings) && Number.isFinite(+b.settings.holoMult)) o.settings.holoMult = Math.min(20, Math.max(1, +(+b.settings.holoMult).toFixed(2)));
+    if (isObj(b.settings) && Number.isFinite(+b.settings.holoMult)) { o.settings.holoMult = Math.min(20, Math.max(1, +(+b.settings.holoMult).toFixed(2))); if (o.settings.holoMult === 2) o.settings.holoMult = 3; } // 2 was the old default: skibidi cards are now worth 3x
     // Power hours: a boost that makes cards more likely for a while. kind: 'weight' (how often the card drops) or 'holo' (skibidi chance).
     if (Array.isArray(b.events)) b.events.slice(0, 30).forEach(function (x) {
       if (!isObj(x) || typeof x.id !== 'string' || !/^[a-z0-9]{4,40}$/.test(x.id)) return;
@@ -336,18 +345,22 @@ Ess Ess Gee Monster`;
     BYTIER.length = 0; POOL.length = 0; TIERS.forEach(function () { BYTIER.push([]); POOL.push([]); });
     if (typeof document !== 'undefined') {
       let st = document.getElementById('ssg-tiers'); if (!st) { st = document.createElement('style'); st.id = 'ssg-tiers'; document.head.appendChild(st); }
-      st.textContent = ':root{' + L.filter(function (t) { return t.custom || t.color !== C0[t.orig]; }).map(function (t) { return '--t-' + slug(t.orig || t.name) + ':' + t.color + ';'; }).join('') + '}' + L.filter(function (t) { return t.custom; }).map(function (t) {
-        const c = 'var(--t-' + slug(t.name) + ')', k = '.t-' + slug(t.name);
+      st.textContent = ':root{' + L.filter(function (t) { return t.custom || t.orig === 'Good Luck' || t.color !== C0[t.orig]; }).map(function (t) { return '--t-' + slug(t.orig || t.name) + ':' + t.color + ';'; }).join('') + '}' + L.filter(function (t) { return t.custom || t.orig === 'Good Luck'; }).map(function (t) {
+        const c = 'var(--t-' + slug(t.orig || t.name) + ')', k = '.t-' + slug(t.orig || t.name);
         return k + ' .tier-text,.tier-text' + k + '{color:' + c + '}.card' + k + ',.special' + k + ',.unit' + k + '{--tc:' + c + '}.slot.revealed' + k + ' .flipper{filter:drop-shadow(0 0 20px ' + c + ')}.idx-item' + k + ' .dot{background:' + c + '}.tier-prog>' + k + '{--tc:' + c + '}';
       }).join('');
     }
   }
+  const BASE_IDS = {}; BASE.forEach(function (b) { BASE_IDS[b.id] = 1; });
+  function removedCards() { return CONFIG.removed.map(function (id) { const b = BASE.find(function (x) { return x.id === id; }); return b ? { id: id, name: b.name, cat: b.cat } : null; }).filter(Boolean); }
+  // Every Sigma card except these two moved to the Goofy Silly set and the Good Luck rarity (card ids are unchanged, so collections are kept).
+  const SIGMA_STAY = ['Split Sparky Doo', 'Wall'];
   function rebuild() {
     rebuildTiers();
     const list = [], seen = {};
     const tierDisp = function (n) { return (CONFIG.tierEdits[n] && CONFIG.tierEdits[n].name) || n; }, catDisp = function (n) { return (CONFIG.setEdits[n] && CONFIG.setEdits[n].name) || n; };
     const extra = function (e) { return { ptsOv: e.pts != null ? e.pts : null, wm: e.w != null ? e.w : 1, holoOv: e.holo != null ? e.holo : null, off: !!e.off, edited: Object.keys(e).length > 0 }; };
-    BASE.forEach(function (b) { const e = CONFIG.edits[b.id] || {}; seen[b.id] = 1; list.push(Object.assign({ id: b.id, name: e.name || b.name, cat: e.cat || catDisp(b.cat), tier: e.tier || tierDisp(b.tier), custom: false, img: CONFIG_IMAGES[b.id] || IMAGES[b.id] || null, base: b }, extra(e))); });
+    BASE.forEach(function (b) { if (CONFIG.removed.indexOf(b.id) >= 0) return; const e = CONFIG.edits[b.id] || {}; seen[b.id] = 1; const goofy = b.tier === 'Sigma' && SIGMA_STAY.indexOf(b.name) < 0; list.push(Object.assign({ id: b.id, name: e.name || b.name, cat: e.cat || catDisp(goofy ? 'Goofy Silly' : b.cat), tier: e.tier || tierDisp(goofy ? 'Good Luck' : b.tier), custom: false, img: CONFIG_IMAGES[b.id] || IMAGES[b.id] || null, base: b }, extra(e))); });
     CONFIG.added.forEach(function (a) { if (seen[a.id]) return; seen[a.id] = 1; const e = CONFIG.edits[a.id] || {}; list.push(Object.assign({ id: a.id, name: e.name || a.name, cat: e.cat || a.cat, tier: e.tier || a.tier, custom: true, img: CONFIG_IMAGES[a.id] || null, base: a }, extra(e))); });
     CARDS.length = 0; Object.keys(BYID).forEach(function (k) { delete BYID[k]; });
     MONSTER_POOL.length = 0;
@@ -371,7 +384,7 @@ Ess Ess Gee Monster`;
   rebuild();
 
   // Coins gained when recycling a spare copy.
-  const SELL = [5, 12, 30, 80, 200, 500, 1500, 2500];
+  const SELL = [5, 12, 30, 80, 200, 500, 1500, 2500, 5000];
 
   // Difficulty settings. interval = minutes per free pack. luck multiplies the weight of Rare and above.
   // pity = packs in a row with nothing Rare+ before the next one is guaranteed (0 = off).
@@ -417,10 +430,13 @@ Ess Ess Gee Monster`;
     if (CONFIG.approved.indexOf(acct.k) >= 0) return true;
     return (+acct.created || 0) < WL_START && CONFIG.revoked.indexOf(acct.k) < 0;
   }
+  // The time of the latest admin reset that applies to this account (0 = none). See app.js checkReset().
+  function feedClear() { return CONFIG.feedClear; }
+  function needReset(k) { return Math.max(CONFIG.resetAll || 0, CONFIG.resets[k] || 0); }
   function eventsNow(now) { now = now || Date.now(); return CONFIG.events.filter(function (e) { return e.start <= now && e.end > now; }); }
   function evHit(e, c) { return e.scope === 'all' || (e.scope === 'rare' && c.fx >= 2) || (e.scope === 'tier' && c.tier === e.value) || (e.scope === 'set' && c.cat === e.value) || (e.scope === 'card' && c.id === e.value); }
   function eventMult(c, kind, now) { let m = 1; eventsNow(now).forEach(function (e) { if (e.kind === (kind || 'weight') && evHit(e, c)) m *= e.mult; }); return m; }
 
-  window.SSG = { isApproved: isApproved, WL_START: WL_START, copyValue: copyValue, TIER_KEY: TIER_KEY, CAT_KEY: CAT_KEY, DEFAULT_CODES: CODES, badgesOf: badgesOf, findCode: findCode, GS: GS, TIER_DEF: TIER_DEF, CAT_DEF: CAT_DEF, cardScore: cardScore, scoreOf: scoreOf, eventsNow: eventsNow, eventMult: eventMult, evHit: evHit, applyConfig: applyConfig, cleanConfig: cleanConfig, getConfig: function () { return CONFIG; }, BASE: BASE, TIERS: TIERS, TIER_COLOR: TIER_COLOR, CATS: CATS, CARDS: CARDS, BYID: BYID, BYTIER: BYTIER, POOL: POOL, MONSTER_POOL: MONSTER_POOL, MONSTER_CHANCE: MONSTER_CHANCE,
+  window.SSG = { removedCards: removedCards, feedClear: feedClear, needReset: needReset, isApproved: isApproved, WL_START: WL_START, copyValue: copyValue, TIER_KEY: TIER_KEY, CAT_KEY: CAT_KEY, DEFAULT_CODES: CODES, badgesOf: badgesOf, findCode: findCode, GS: GS, TIER_DEF: TIER_DEF, CAT_DEF: CAT_DEF, cardScore: cardScore, scoreOf: scoreOf, eventsNow: eventsNow, eventMult: eventMult, evHit: evHit, applyConfig: applyConfig, cleanConfig: cleanConfig, getConfig: function () { return CONFIG; }, BASE: BASE, TIERS: TIERS, TIER_COLOR: TIER_COLOR, CATS: CATS, CARDS: CARDS, BYID: BYID, BYTIER: BYTIER, POOL: POOL, MONSTER_POOL: MONSTER_POOL, MONSTER_CHANCE: MONSTER_CHANCE,
     BASE_WEIGHTS: BASE_WEIGHTS, TIER_FX: TIER_FX, TIER0: TIER0, CAT_BASE: CAT_BASE, SELL: SELL, POINTS: POINTS, CODES: CODES, DIFFS: DIFFS, hash: hash, rng: rng };
 })();

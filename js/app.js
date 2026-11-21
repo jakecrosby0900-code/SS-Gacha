@@ -19,7 +19,7 @@
   const KEY = 'ss-gacha-save-v1';
   let memorySave = null; // used if localStorage is blocked
   function fresh() {
-    return { v: 1, mod: 0, syncMod: 0, granted: {}, started: false, diff: 'sigma', packs: DIFFS.sigma.start, bonus: 0, last: Date.now(), sinceRare: 0, cards: {}, wish: {}, wk: null, showcase: [],
+    return { v: 1, mod: 0, syncMod: 0, granted: {}, started: false, diff: 'sigma', packs: DIFFS.sigma.start, bonus: 0, last: Date.now(), sinceRare: 0, cards: {}, wish: {}, wk: null, showcase: [], resetAt: Date.now(),
       stats: { opened: 0, pulls: 0 }, settings: { sound: true, volume: 0.6, motion: true, monster: false, share: true },
       // The "fake account": lives in the save file. id is random and only there so a leaderboard can tell players apart later.
       profile: { id: uid(), name: 'Player', bio: '', pfp: null, banner: null, hue: 28, joined: Date.now() }, codes: [], account: null,
@@ -42,7 +42,7 @@
     s.bonus = Math.max(0, Math.floor(+j.bonus) || 0); s.mod = +j.mod || 0; s.syncMod = +j.syncMod || 0; s.settings.share = true; // sharing is always on now: the account save depends on it
     s.wish = {}; if (isObj(j.wish)) Object.keys(j.wish).slice(0, 400).forEach((id) => { if (j.wish[id]) s.wish[id] = 1; });
     s.showcase = Array.isArray(j.showcase) ? j.showcase.filter((x) => typeof x === 'string' && /\|[01]$/.test(x)).slice(0, 5) : [];
-    s.wk = isObj(j.wk) && +j.wk.t > 0 ? { t: +j.wk.t, s: Math.max(0, +j.wk.s || 0) } : null;
+    s.wk = isObj(j.wk) && +j.wk.t > 0 ? { t: +j.wk.t, s: Math.max(0, +j.wk.s || 0), v: +j.wk.v || 1 } : null; s.resetAt = +j.resetAt || 0;
     s.codes = Array.isArray(j.codes) ? j.codes.map(String) : [];
     s.account = typeof j.account === 'string' && j.account ? j.account.slice(0, 20) : null;
     const jn = (j && j.net) || {};
@@ -50,7 +50,7 @@
       // recent settled trades, shown on the home page: dir from/to, who, a = cards I gave, b = cards I got, st = outcome
       log: Array.isArray(jn.log) ? jn.log.filter(isObj).slice(0, 20).map((x) => ({ at: +x.at || 0, dir: x.dir === 'to' ? 'to' : 'from', who: String(x.who || '').slice(0, 20), a: Math.max(0, +x.a | 0), b: Math.max(0, +x.b | 0), st: ['accepted', 'denied', 'cancelled', 'invalid'].indexOf(x.st) >= 0 ? x.st : 'invalid' })) : [] };
     const sj = isObj(j.social) ? j.social : {};
-    s.social = { notes: Array.isArray(sj.notes) ? sj.notes.filter((x) => isObj(x) && typeof x.id === 'string').slice(0, 60).map((x) => ({ id: x.id.slice(0, 80), at: +x.at || 0, type: String(x.type || 'info').slice(0, 12), text: String(x.text || '').slice(0, 200), href: String(x.href || '').slice(0, 80), read: x.read ? 1 : 0 })) : [],
+    s.social = { notes: Array.isArray(sj.notes) ? sj.notes.filter((x) => isObj(x) && typeof x.id === 'string').slice(0, 60).map((x) => ({ id: x.id.slice(0, 80), at: +x.at || 0, type: String(x.type || 'info').slice(0, 12), text: String(x.text || '').slice(0, 200), href: String(x.href || '').slice(0, 80), read: x.read ? Math.max(1, +x.read || 1) : 0 })) : [],
       nseen: isObj(sj.nseen) ? sj.nseen : {}, seen: isObj(sj.seen) ? sj.seen : {}, badges: Array.isArray(sj.badges) ? sj.badges.map(String).slice(0, 80) : null };
     return s;
   }
@@ -170,7 +170,7 @@
         <div class="card-body"><div class="card-name ${c.name.length > 24 ? 'long' : ''}">${o.locked ? '???' : esc(c.name)}</div></div>
       </div>
       <div class="foil"></div><div class="glare"></div>${sp}
-      ${o.copiesText || o.count > 1 ? `<span class="copies">${o.copiesText || '×' + o.count}</span>` : ''}${o.holo ? '<span class="holo-badge">✦ SKIBIDI</span>' : ''}${o.fav ? '<span class="fav">★</span>' : ''}${o.locked ? '' : `<span class="pts">${o.holo ? c.pts * G.GS.holoMult : c.pts} pt${(o.holo ? c.pts * G.GS.holoMult : c.pts) === 1 ? '' : 's'}</span>`}
+      ${o.copiesText || o.count > 1 ? `<span class="copies">${o.copiesText || '×' + o.count}</span>` : ''}${o.holo ? '<span class="holo-badge">✦ SKIBIDI</span>' : ''}${o.fav ? '<span class="fav">★</span>' : ''}
     </div>`;
   }
   // 3D tilt for packs: rotates toward the pointer and moves the foil sheen.
@@ -197,6 +197,16 @@
     el.addEventListener('pointerleave', () => { el.classList.remove('tilting'); ['--rx', '--ry'].forEach((k) => el.style.setProperty(k, '0deg')); ['--px', '--py'].forEach((k) => el.style.setProperty(k, '0')); });
   }
 
+  // Every card gets the 3D tilt the first time the pointer reaches it (trade pickers, board, pop-ups and so on built their cards without it).
+  document.addEventListener('pointerover', (e) => { const el = e.target.closest && e.target.closest('.card'); if (!el || el._tl || el.closest('.no-tilt')) return; el._tl = 1; tilt(el); el.classList.add('tilting'); });
+  // Card names shrink until they fit their box (long names used to push the rarity and set off the card).
+  const fitName = (el) => {
+    if (el.dataset.fit === el.textContent) return; el.style.fontSize = ''; const base = parseFloat(getComputedStyle(el).fontSize) || 12; let size = base, guard = 0;
+    while ((el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1) && size > base * 0.4 && guard++ < 30) { size -= base * 0.04; el.style.fontSize = size.toFixed(2) + 'px'; }
+    el.dataset.fit = el.textContent;
+  };
+  let fitT = 0; const fitAll = () => { clearTimeout(fitT); fitT = setTimeout(() => $$('.card-name').forEach((el) => { if (el.offsetParent !== null) fitName(el); }), 30); };
+  new MutationObserver(fitAll).observe(document.body, { childList: true, subtree: true }); addEventListener('resize', () => { $$('.card-name').forEach((el) => { delete el.dataset.fit; }); fitAll(); });
   // ---------- toast + modal ----------
   function toast(msg, err) {
     const t = document.createElement('div'); t.className = 'toast' + (err ? ' err' : ''); t.textContent = msg;
@@ -213,21 +223,43 @@
   function closeModal(bg) { (bg || $$('.modal-bg').pop())?.remove(); if (!$('.modal-bg')) document.documentElement.classList.remove('modal-open'); }
 
   // ---------- header ----------
-  const NAV = [['home', 'Home', '🎴', 1], ['collection', 'Collection', '🗂️', 1], ['index', 'Index', '📖', 0], ['leaderboard', 'Leaderboard', '🏆', 1], ['trades', 'Trades', '⇄', 1], ['board', 'Board', '📋', 0], ['friends', 'Friends', '🤝', 0], ['profile', 'Profile', '👤', 0], ['options', 'Settings', '⚙️', 0]]; // [page, label, icon, shown in the phone's bottom bar]
+  const NAV = [['home', 'Home', '🎴', 1], ['collection', 'Collection', '🗂️', 1], ['index', 'Index', '📖', 0], ['leaderboard', 'Leaderboard', '🏆', 1], ['trades', 'Trades', '⇄', 1], ['board', 'Board', '📋', 0]]; // Profile, Friends and Settings live in the account menu (top right)
+  const MENU_PAGES = ['profile', 'friends', 'options', 'chat', 'imagereq', 'suggest']; // [page, label, icon, shown in the phone's bottom bar]
   let net = null, auth = null, admin = null, social = null; // the online layer (js/net.js), accounts (js/auth.js) and admin (js/admin.js), created at the bottom
   const BOLT = '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M13.5 2 4 13.5h6.2L8.5 22 20 9.8h-6.6z" fill="currentColor"/></svg>';
-  const navLink = ([h, l, ic], cur) => `<a href="#${h}" style="order:${NAV.findIndex((n) => n[0] === h)}" ${cur === h ? 'aria-current="page"' : ''}><span class="ni" aria-hidden="true">${ic}</span><span class="nl">${l}</span>${h === 'trades' ? '<span class="nbadge" data-tradebadge hidden></span>' : ''}${h === 'friends' ? '<span class="nbadge" data-friendbadge hidden></span>' : ''}</a>`;
+  const navLink = ([h, l, ic], cur) => `<a href="#${h}" style="order:${NAV.findIndex((n) => n[0] === h)}" ${cur === h ? 'aria-current="page"' : ''}><span class="ni" aria-hidden="true">${ic}</span><span class="nl">${l}</span>${h === 'trades' ? '<span class="nbadge" data-tradebadge hidden></span>' : ''}</a>`;
   function renderHeader() {
     if (!auth || !auth.loggedIn() || gated()) { const hd0 = $('#header'); hd0.dataset.sig = ''; hd0.innerHTML = `<a class="logo" href="#home">${BOLT}<span>Special Strike <b>Gacha</b></span></a>`; return; }
-    const cur0 = (location.hash.slice(1) || 'home').split('-')[0], cur = cur0 === 'user' ? 'leaderboard' : cur0 === 'players' ? 'leaderboard' : cur0 === 'trade' ? 'trades' : cur0 === 'post' ? 'board' : cur0 === 'chat' ? 'friends' : cur0 === 'imagereq' ? 'options' : cur0;
+    const cur0 = (location.hash.slice(1) || 'home').split('-')[0], cur = cur0 === 'user' ? 'leaderboard' : cur0 === 'players' ? 'leaderboard' : cur0 === 'trade' ? 'trades' : cur0 === 'post' ? 'board' : cur0;
     const hd = $('#header'), html = `<a class="logo" href="#home">${BOLT}<span>Special Strike <b>Gacha</b></span></a>
       <nav class="main" aria-label="Main">${NAV.filter((n) => n[3]).map((n) => navLink(n, cur)).join('')}<button type="button" class="nav-more${NAV.some(([h, , , pri]) => !pri && h === cur) ? ' on' : ''}" data-act="nav-more" aria-expanded="false" style="order:${NAV.length}"><span class="ni" aria-hidden="true">⋯</span><span class="nl">More</span></button><div class="more-sheet">${NAV.filter((n) => !n[3]).map((n) => navLink(n, cur)).join('')}</div></nav>
       <div class="top-right"><a class="chip" href="#home" title="Packs ready"><span class="pk"></span><b data-hud="packs">${S.packs}</b><small class="muted">/ ${D().cap}</small><i class="bonus-mini" data-hud-bonus title="Bonus packs from codes and gifts">${S.bonus ? '+' + S.bonus : ''}</i></a>
-        <a class="icon-btn bell" href="#notifications" aria-label="Notifications" title="Notifications">🔔<b class="bell-n" data-notebadge hidden></b></a><a class="me" href="#profile" title="${esc(S.profile.name)}">${avatarHTML(32)}<i class="netdot" data-netdot></i></a>
+        <button type="button" class="icon-btn bell" data-bell aria-haspopup="true" aria-expanded="false" aria-label="Notifications" title="Notifications">🔔<b class="bell-n" data-notebadge hidden></b></button><button type="button" class="me${MENU_PAGES.indexOf(cur) >= 0 ? ' on' : ''}" data-prof aria-haspopup="true" aria-expanded="false" title="${esc(S.profile.name)}: account menu">${avatarHTML(32)}<i class="netdot" data-netdot></i><b class="me-n" data-friendbadge hidden></b><span class="me-caret" aria-hidden="true">▾</span></button>
         <button class="icon-btn" data-act="toggle-sound" aria-label="Sound ${S.settings.sound ? 'on' : 'off'}" title="Sound">${S.settings.sound ? '🔊' : '🔇'}</button></div>`;
     if (hd.dataset.sig !== html) { hd.innerHTML = html; hd.dataset.sig = html; } // unchanged header is left alone (no flicker, open menus stay open)
     if (net) net.paint();
   }
+  // ---------- account menu (top right) ----------
+  let profOpen = false;
+  function profPlace() { const box = $('#profpanel'), btn = $('[data-prof]'); if (!box || !btn) return; const r = btn.getBoundingClientRect(); box.style.top = Math.round(r.bottom + 8) + 'px'; box.style.right = Math.max(8, Math.round(innerWidth - r.right)) + 'px'; }
+  function profOpenMenu() {
+    if (profOpen) return; profOpen = true; const box = document.createElement('div'); box.id = 'profpanel'; box.className = 'profpanel'; box.setAttribute('role', 'menu');
+    const se = auth.session(), hud = net.state.dir.find((p) => p.id === S.profile.id);
+    box.innerHTML = `<div class="pp-user">${avatarHTML(44)}<span><b>${esc(S.profile.name)}</b><small class="muted">${S.packs} / ${D().cap} packs</small></span><a class="pp-gear" href="#options" title="Settings" aria-label="Settings">⚙️</a></div>
+      <a class="pp-item" role="menuitem" href="#profile">Profile</a>
+      <a class="pp-item" role="menuitem" href="#friends">Friends<span class="nbadge" data-friendbadge hidden></span></a>
+      ${admin && admin.unlocked() ? '<a class="pp-item" role="menuitem" href="#admin">Admin</a>' : ''}
+      <div class="pp-sep"></div><button type="button" class="pp-item pp-out" role="menuitem" data-pp="logout">Log out</button>`;
+    document.body.append(box); const b = $('[data-prof]'); if (b) b.setAttribute('aria-expanded', 'true'); profPlace(); if (net) net.paint();
+  }
+  function profClose() { if (!profOpen) return; profOpen = false; const b = $('#profpanel'); if (b) b.remove(); const t = $('[data-prof]'); if (t) t.setAttribute('aria-expanded', 'false'); }
+  document.addEventListener('click', (e) => {
+    const t = e.target.closest && e.target.closest('[data-prof]'); if (t) { e.preventDefault(); profOpen ? profClose() : profOpenMenu(); return; }
+    const o = e.target.closest && e.target.closest('[data-pp]'); if (o) { profClose(); if (o.dataset.pp === 'logout') auth.logOut(); return; }
+    if (profOpen && (e.target.closest('#profpanel .pp-item') || !e.target.closest('#profpanel'))) profClose();
+  });
+  addEventListener('hashchange', profClose); addEventListener('resize', profPlace); addEventListener('scroll', profPlace, { passive: true });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && profOpen) { profClose(); const b = $('[data-prof]'); if (b) b.focus(); } });
   function updateHud() {
     tick();
     $$('[data-hud="packs"]').forEach((e) => (e.textContent = S.packs));
@@ -432,7 +464,7 @@
     const rows = [];
     net.incoming().forEach((t) => rows.push({ st: 'offer', dir: 'from', who: t.from.name, a: t.want.length, b: t.give.length }));
     net.outgoing().forEach((o) => rows.push({ st: 'pending', dir: 'to', who: o.toName, a: o.give.length, b: o.want.length }));
-    S.net.log.forEach((x) => rows.push(x));
+    S.net.log.forEach((x) => { if (!x.at || x.at > G.feedClear().trades) rows.push(x); });
     return rows.length ? rows.slice(0, 10).map((x) => `<a class="feed-row" href="#trades"><span class="tag st-${x.st}">${TRADE_TAGS[x.st]}</span><span class="grow">${x.dir === 'from' ? 'From' : 'To'} <b>${esc(x.who)}</b>: ${x.a} ⇄ ${x.b} card${x.a === 1 && x.b === 1 ? '' : 's'}</span>${x.at ? `<small class="muted">${since(x.at)}</small>` : ''}</a>`).join('')
       : '<p class="muted small">No trades yet. Offers you send and receive show up here.</p>';
   }
@@ -553,6 +585,7 @@
         <label class="check"><input id="optMotion" type="checkbox" ${S.settings.motion ? 'checked' : ''}> Animations</label></div></section>
       <section class="panel"><h2>The Monster 👹</h2><label class="check"><input id="optMonster" type="checkbox" ${S.settings.monster ? 'checked' : ''}> Let the monster in</label><p class="muted small">Each pack you open has a 25% chance that the monster eats one random card from it. Eaten cards are gone for good and never reach your collection. But with the monster in, ${G.MONSTER_POOL.length} special cards of the Monster rarity can also drop that cannot be found any other way. Monster is a little rarer than Sigma.</p></section>
       <section class="panel"><h2>Card images 🖼️</h2><p class="muted small">Think a card needs a better picture? Pick the card, send your image, and an admin can approve it. If it is approved, everyone sees it.</p><a class="btn" href="#imagereq">Request a card image</a></section>
+      <section class="panel"><h2>Card suggestions 💡</h2><p class="muted small">Want a card or a whole set that is not in the game yet? Suggest it, with a picture if you have one. If an admin approves it, it is added for everyone.</p><a class="btn" href="#suggest">Suggest a card or set</a></section>
       ${net ? net.settingsHTML() : ''}
       ${auth ? auth.settingsHTML() : ''}
       ${admin ? admin.settingsHTML() : ''}`;
@@ -624,14 +657,68 @@
     bg.addEventListener('click', (e) => { const z = e.target.closest('[data-zoom]'); if (z) { z.dataset.zoom === 'close' ? close() : step(z.dataset.zoom === 'next' ? 1 : -1); } else if (!e.target.closest('.card')) close(); });
     addEventListener('keydown', key, true); draw(); SFX.click(); const x = $('.zoom-x', bg); if (x) x.focus({ preventScroll: true });
   }
-  function cardPop(id, anchor, src) {
-    if (!BYID[id]) return;
-    const other = src ? net.state.dir.find((p) => p.id === src) : null, key = 'card:' + id + ':' + (src || '');
-    if (popup.key === key) { popClose(); return; }
-    const cards = other && other.id !== S.profile.id ? other.cards : S.cards, who = other && other.id !== S.profile.id ? other.name : '';
-    const el = popOpen(anchor, cardPopHTML(id, cards, who), { key, cls: 'info' }); el.dataset.id = id; el.dataset.who = who; el._cards = cards;
+  // ---------- card page ----------
+  // Clicking a card opens this page: the card big and draggable in 3D on the left, its details on the right. Several copies are shown as a
+  // switch between the normal and skibidi versions plus what each copy is worth, so there is no separate duplicates view any more.
+  const cv = { id: '', src: '', v: 0, rx: 0, ry: 0 };
+  const cvCards = () => { if (cv.src) { const o = net.state.dir.find((p) => p.id === cv.src); if (o) return o.cards; } return S.cards; };
+  const odds = (p) => (p <= 0 ? 'Not in packs' : `${(p * 100).toFixed(p < 0.0001 ? 5 : p < 0.01 ? 4 : 2)}% (1 in ${Math.round(1 / p).toLocaleString('en-GB')})`);
+  function cardPop(id, anchor, src) { cardView(id, src); }
+  function cardView(id, src) {
+    if (!BYID[id]) return; popClose();
+    const old = $('.modal-bg .cardview'); if (old) closeModal(old.closest('.modal-bg'));
+    const other = src ? net.state.dir.find((p) => p.id === src) : null; cv.id = id; cv.src = other && other.id !== S.profile.id ? other.id : ''; cv.rx = cv.ry = 0;
+    const e = cvCards()[id]; cv.v = e && e.h > 0 ? 1 : 0;
+    modal('<div class="cv"></div>', 'cardview'); cvDraw();
   }
-  function cardPopRefresh() { const el = popup.el; if (el && el.dataset.id) popSet(cardPopHTML(el.dataset.id, el._cards || S.cards, el.dataset.who || '')); }
+  function cvApply() { const d = $('.cardview .cv-3d'); if (d) { d.style.setProperty('--rx', cv.rx + 'deg'); d.style.setProperty('--ry', cv.ry + 'deg'); } }
+  function cvDraw() {
+    const box = $('.cardview .cv'); if (!box) return;
+    const id = cv.id, c = BYID[id], o = cv.src ? net.state.dir.find((p) => p.id === cv.src) : null, who = o ? o.name : '', cards = cvCards(), e = cards[id], own = !!(e && e.n > 0), mine = !cv.src;
+    if (own) { if (cv.v && !(e.h > 0)) cv.v = 0; if (!cv.v && e.n - e.h <= 0) cv.v = 1; } else cv.v = 0;
+    const hidden = c.monster && !own, both = own && e.h > 0 && e.n - e.h > 0;
+    const w = Math.round(Math.max(190, Math.min(300, innerWidth * 0.64, (innerHeight - 250) * 5 / 7)));
+    const d = D(), list = dropList(), idx = list.indexOf(c), wt = dropWeights(d, false, list), tot = wt.reduce((a, b) => a + b, 0) || 1, per = idx >= 0 ? wt[idx] / tot : 0, perPack = 1 - Math.pow(1 - per, CARDS_PER_PACK), hp = holoP(c);
+    const vals = own ? Array.from({ length: Math.min(e.n, 8) }, (_, i) => G.copyValue(c, i + 1, i < e.h)) : [];
+    const row = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`, mult = G.GS.holoMult, fn = (v) => G.GS.holoMult && fmtPts(v);
+    const action = mine ? (own ? `<button class="btn sm" data-act="fav" data-id="${id}">${e.f ? '★ Unfavorite' : '☆ Favorite'}</button>` : `<button class="btn sm ${S.wish[id] ? 'primary' : ''}" data-act="wish" data-id="${id}">${S.wish[id] ? '🔖 On your wishlist' : '🔖 Add to wishlist'}</button>`) : (!(S.cards[id] && S.cards[id].n > 0) ? `<button class="btn sm ${S.wish[id] ? 'primary' : ''}" data-act="wish" data-id="${id}">${S.wish[id] ? '🔖 On your wishlist' : '🔖 Add to wishlist'}</button>` : '');
+    const frame = box.querySelector('.cv-3d'), keep = !!frame && frame.dataset.id === id + ':' + cv.v + ':' + (hidden ? 1 : 0);
+    box.innerHTML = `<div class="cv-left"><div class="cv-stage no-tilt" title="Drag to spin"><div class="cv-3d" data-id="${id}:${cv.v}:${hidden ? 1 : 0}" style="--cw:${w}px;--rx:${cv.rx}deg;--ry:${cv.ry}deg"><div class="cv-face cv-front">${cardHTML(c, { holo: !!cv.v, size: w, locked: hidden && !!c.monster })}</div><div class="cv-face cv-back"><div class="card-back">${BOLT}</div></div></div></div>
+        <div class="cv-ctl"><button class="btn sm" data-cv="flip" type="button">Flip</button><button class="btn sm" data-cv="reset" type="button">Reset</button><span class="muted small">Drag to spin</span></div></div>
+      <div class="cv-right"><h2 class="cv-title">#${c.rank} ${hidden ? '???' : esc(c.name)}</h2>
+        <div class="cv-tier tier-text ${tcls(c.tier)}">${c.tier.toUpperCase()}</div>
+        ${both ? `<div class="cv-vars" role="group" aria-label="Version"><button type="button" class="btn sm ${cv.v ? '' : 'primary'}" data-cv="v0">Normal ×${e.n - e.h}</button><button type="button" class="btn sm ${cv.v ? 'primary' : ''}" data-cv="v1">✦ Skibidi ×${e.h}</button></div>` : ''}
+        <dl class="cv-dl">${row('Set', esc(c.cat))}${row('Rank', `#${c.rank} of ${CARDS.filter((x) => !x.off).length}`)}
+          ${row('Score value', `${fmtPts(c.pts)} pts <span class="muted">(${fmtPts(c.pts * mult)} as a skibidi)</span>`)}
+          ${row(who ? `${esc(who)}'s score from this card` : 'Your score from this card', own ? `${fmtPts(G.cardScore(c, e))} pts <span class="muted">(${e.n === 1 ? 'their only copy'.replace('their', who ? 'their' : 'your') : 'all ' + e.n + (who ? ' of their' : ' of your') + ' copies'})</span>` : '—')}
+          ${vals.length > 1 ? row('Copy values', `<span class="cv-copies">${vals.map((v, i) => `<span class="${i < e.h ? 'holo' : ''}">${i + 1}${['st', 'nd', 'rd'][i] || 'th'}: ${fmtPts(v)}</span>`).join('')}${e.n > 8 ? '<span>…</span>' : ''}</span><small class="muted">Each extra copy is worth 1/N of the first.</small>`) : ''}
+          ${row('Drop chance', c.monster && !S.settings.monster ? 'Only while the monster is let in (Settings)' : per > 0 ? `${odds(per)} per card<br><span class="muted">${(perPack * 100).toFixed(perPack < 0.01 ? 3 : 2)}% per pack</span>` : 'Not in packs')}
+          ${per > 0 ? row('Skibidi chance', `${odds(per * hp)} per card`) : ''}
+          ${row(who ? `${esc(who)} owns` : 'You own', own ? `${e.n - e.h} normal · ${e.h} skibidi` : who ? 'None' : 'Not found yet')}</dl>
+        <p class="cv-blurb muted">${esc(CATS[c.cat] ? CATS[c.cat].blurb : '')}</p>
+        <div class="row wrap">${action}</div></div>`;
+    if (keep) { /* same card: nothing else to do */ }
+    cvApply(); const st = $('.cardview .cv-3d'); if (st) st.style.transition = '';
+  }
+  function cardPopRefresh() { if ($('.cardview .cv')) cvDraw(); }
+  // dragging the card spins it; Flip turns it over; Reset brings it back
+  (function () {
+    let dr = null;
+    document.addEventListener('pointerdown', (e) => { const st = e.target.closest && e.target.closest('.cv-stage'); if (!st) return; dr = { x: e.clientX, y: e.clientY, rx: cv.rx, ry: cv.ry }; try { st.setPointerCapture(e.pointerId); } catch (er) { /* ignore */ } const d = $('.cv-3d', st); if (d) d.style.transition = 'none'; });
+    document.addEventListener('pointermove', (e) => {
+      if (!dr) return; cv.ry = dr.ry + (e.clientX - dr.x) * 0.6; cv.rx = Math.max(-40, Math.min(40, dr.rx - (e.clientY - dr.y) * 0.4)); cvApply();
+      const card = $('.cv-front .card'), st = $('.cv-stage'); if (card && st) { const b = st.getBoundingClientRect(), x = (e.clientX - b.left) / b.width, y = (e.clientY - b.top) / b.height; card.style.setProperty('--mx', (x * 100).toFixed(1) + '%'); card.style.setProperty('--my', (y * 100).toFixed(1) + '%'); }
+    });
+    const up = () => { if (!dr) return; dr = null; const d = $('.cv-3d'); if (d) { d.style.transition = 'transform .6s cubic-bezier(.2,.8,.2,1)'; cv.rx = 0; cvApply(); } };
+    document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
+    document.addEventListener('click', (e) => {
+      const t = e.target.closest && e.target.closest('[data-cv]'); if (!t) return; const a = t.dataset.cv, d = $('.cv-3d');
+      if (a === 'v0' || a === 'v1') { cv.v = a === 'v1' ? 1 : 0; cvDraw(); return; }
+      if (d) d.style.transition = 'transform .7s cubic-bezier(.3,.9,.3,1)';
+      if (a === 'flip') { cv.ry += 180; cv.rx = 0; } else if (a === 'reset') { cv.ry = Math.round(cv.ry / 360) * 360; cv.rx = 0; if (!cv.ry) cv.ry = 0; }
+      SFX.click(); cvApply();
+    });
+  })();
 
   // ---------- pack opening ----------
   let opening = false;
@@ -667,10 +754,17 @@
     // Rip it open: press near the top of the pack and drag across. (Enter / Space or Skip also tear it, for keyboards.)
     const tapColors = ['#b794ff', '#4ade80', '#fff', '#8b5cf6'];
     const pack0 = $('.pack', stage); packTilt(pack0); stage.style.touchAction = 'none'; stage.tabIndex = 0; stage.setAttribute('aria-label', single ? 'Pack. Drag across the top to rip it open, or press Enter.' : n + ' packs stacked. Drag across the top to slice them all open, or press Enter.');
+    const glint = document.createElement('i'); glint.className = 'tear-glint'; pack0.append(glint);
+    // Cut the top strip into slices (each a copy of the strip, clipped) so it can peel up progressively along the drag instead of sliding off in one piece.
+    (function () {
+      const top = $('.ppk:last-child .bag-top', pack0) || $('.bag-top', pack0); if (!top || reduceMotion()) return; const bag = top.parentNode, N = 14, strip = document.createElement('div'); strip.className = 'tearstrip';
+      for (let i = 0; i < N; i++) { const sl = document.createElement('div'); sl.className = 'ts'; sl.style.setProperty('--i', i); sl.style.clipPath = `inset(0 ${Math.max(0, 100 - (i + 1) / N * 100 - 0.25).toFixed(2)}% 0 ${(i / N * 100).toFixed(2)}%)`; sl.append(top.cloneNode(true)); strip.append(sl); }
+      const slot = document.createElement('div'); slot.className = 'pack-slot'; bag.insertBefore(slot, top); bag.insertBefore(strip, top); top.style.display = 'none';
+    })();
     const ripped = new Promise((resolve) => {
-      let drag = null, lastTick = 0, done = false;
-      const set = (v) => { stage.style.setProperty('--rip', v.toFixed(3)); };
-      const finishRip = () => { if (done) return; done = true; drag = null; set(1); resolve(); };
+      let drag = null, lastTick = 0, done = false, lastSpark = 0;
+      const set = (v) => { stage.style.setProperty('--rip', v.toFixed(3)); if (v - lastSpark > 0.06 && !done) { lastSpark = v; if (navigator.vibrate) navigator.vibrate(5); const r = pack0.getBoundingClientRect(); fx.burst(['#ffffff', '#e9e3ff', '#b794ff'], 3, false, r.left + r.width * Math.min(1, v), r.top + r.height * 0.1); } if (v < 0.05) lastSpark = 0; };
+      const finishRip = () => { if (done) return; done = true; drag = null; set(1); stage.classList.remove('ripping'); if (!reduceMotion()) pack0.animate([{ scale: '1' }, { scale: '1.06' }, { scale: '1' }], { duration: 300, easing: 'ease-out' }); resolve(); };
       ripGo = finishRip;
       stage.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); finishRip(); } });
       stage.addEventListener('pointerdown', (ev) => {
@@ -694,49 +788,57 @@
       const fast = () => skipped || reduceMotion();
       if (!skipped) { SFX.tear(); stage.classList.add('torn'); $('.flash', ov).classList.add('go'); fx.burst(['#b794ff', '#4ade80', '#fff', '#8b5cf6'], 90); }
       const sorted = all.slice().sort((a, b) => b.card.ti - a.card.ti || (b.holo ? 1 : 0) - (a.holo ? 1 : 0) || a.card.rank - b.card.rank);
+      // The cards leap out of the pack backs first, spin and land face down in `row` (the same for one pack or many).
+      const jumpOut = async (row) => {
+        if (fast()) return;
+        const pr = pack0.getBoundingClientRect(), px = pr.left + pr.width / 2, py = pr.top + pr.height * 0.3, slots = $$('.slot', row); let end = 0;
+        slots.forEach((slot, i) => {
+          const r = $('.flipper', slot).getBoundingClientRect(), dx = px - (r.left + r.width / 2), dy = py - (r.top + r.height / 2), k = i - (slots.length - 1) / 2, d = 80 + i * (slots.length > 6 ? 70 : 120);
+          end = Math.max(end, d + 980);
+          slot.animate([
+            { transform: `translate(${dx}px, ${dy}px) scale(.45) rotate(${-k * 7}deg)`, opacity: 0, offset: 0 },
+            { transform: `translate(${dx}px, ${dy}px) scale(.45) rotate(${-k * 7}deg)`, opacity: 1, offset: 0.05, easing: 'cubic-bezier(.15,.75,.3,1)' },
+            { transform: `translate(${dx * 0.5 - k * 30}px, ${dy - 170 - Math.abs(k) * 10}px) scale(1.12) rotate(${k * 11}deg)`, opacity: 1, offset: 0.44, easing: 'cubic-bezier(.5,0,.85,.55)' },
+            { transform: `translate(${-k * 5}px, -12px) scale(1.04) rotate(${-k * 2}deg)`, opacity: 1, offset: 0.82, easing: 'ease-out' },
+            { transform: 'translate(0, 0) scale(1) rotate(0deg)', opacity: 1, offset: 1 }
+          ], { duration: 980, delay: d, fill: 'both' });
+          setTimeout(() => { if (!skipped) SFX.draw(); }, d + 30); setTimeout(() => { if (!skipped) SFX.place(); }, d + 800);
+        });
+        setTimeout(() => stage.classList.add('emptying'), 360);
+        await wait(end + 280);
+      };
+      // Turning a card over is animated explicitly (so it can never "snap", even straight after the shaking of a rare card).
+      const flipSlot = (slot) => {
+        const f = $('.flipper', slot); slot.classList.remove('suspense'); void f.offsetWidth; f.classList.add('flipped');
+        if (!fast()) f.animate([{ transform: 'translateY(0) scale(1) rotateY(0deg)' }, { transform: 'translateY(-34px) scale(1.15) rotateY(90deg)', offset: 0.5 }, { transform: 'translateY(0) scale(1) rotateY(180deg)' }], { duration: 760, easing: 'cubic-bezier(.3,.8,.3,1)' });
+      };
+      const backs = (n) => Array.from({ length: n }, (_, i) => `<div class="slot" data-i="${i}"><div class="flipper"><div class="face back"><div class="card-back">${BOLT}</div></div></div></div>`).join('');
+      if (!fast()) { const rays = document.createElement('div'); rays.className = 'pack-rays'; stage.append(rays); await wait(520); }
       if (single) {
         const cs = results[0].slice().sort((a, b) => a.card.ti - b.card.ti);
-        // 1) light bursts out of the torn pack
-        if (!fast()) { const rays = document.createElement('div'); rays.className = 'pack-rays'; stage.append(rays); await wait(520); }
-        // 2) the cards jump out of the pack backs first, spin and land face down in a row
         const row = document.createElement('div'); row.className = 'reveal-row';
         row.innerHTML = cs.map((o, i) => `<div class="slot ${o.eaten ? 'eaten' : tcls(o.card.tier)}" data-i="${i}"><div class="flipper"><div class="face back"><div class="card-back">${BOLT}</div></div><div class="face front">${o.eaten ? MONSTER : cardHTML(o.card, { holo: o.holo })}</div></div><div class="reveal-label"></div></div>`).join('');
-        ov.append(row);
-        if (!fast()) {
-          const pr = pack0.getBoundingClientRect(), px = pr.left + pr.width / 2, py = pr.top + pr.height * 0.3, slots = $$('.slot', row); let end = 0;
-          slots.forEach((slot, i) => {
-            const r = $('.flipper', slot).getBoundingClientRect(), dx = px - (r.left + r.width / 2), dy = py - (r.top + r.height / 2), k = i - (slots.length - 1) / 2, d = 80 + i * 120;
-            end = Math.max(end, d + 980);
-            slot.animate([
-              { transform: `translate(${dx}px, ${dy}px) scale(.45) rotate(${-k * 7}deg)`, opacity: 0, offset: 0 },
-              { transform: `translate(${dx}px, ${dy}px) scale(.45) rotate(${-k * 7}deg)`, opacity: 1, offset: 0.05, easing: 'cubic-bezier(.15,.75,.3,1)' },
-              { transform: `translate(${dx * 0.5 - k * 30}px, ${dy - 170 - Math.abs(k) * 10}px) scale(1.12) rotate(${k * 11}deg)`, opacity: 1, offset: 0.44, easing: 'cubic-bezier(.5,0,.85,.55)' },
-              { transform: `translate(${-k * 5}px, -12px) scale(1.04) rotate(${-k * 2}deg)`, opacity: 1, offset: 0.82, easing: 'ease-out' },
-              { transform: 'translate(0, 0) scale(1) rotate(0deg)', opacity: 1, offset: 1 }
-            ], { duration: 980, delay: d, fill: 'both' });
-            setTimeout(() => { if (!skipped) SFX.draw(); }, d + 30); setTimeout(() => { if (!skipped) SFX.place(); }, d + 800);
-          });
-          setTimeout(() => stage.classList.add('emptying'), 360);
-          await wait(end + 280);
-        }
-        stage.remove();
-        // 3) flip them over one at a time
+        ov.append(row); await jumpOut(row); stage.remove();
+        // flip them over one at a time
         for (let i = 0; i < cs.length && !skipped; i++) {
           const o = cs[i], c = o.card, slot = $(`.slot[data-i="${i}"]`, row);
           await wait(380); if (skipped) break;
-          if (o.eaten) { SFX.tear(); $('.flipper', slot).classList.add('flipped'); slot.classList.add('revealed'); fx.burst(['#ff4d6d', '#4ade80', '#000'], 60); $('.reveal-label', slot).innerHTML = `<span class="monster-line">The monster ate <b>${esc(c.name)}</b>!</span>`; say(`The monster ate ${c.name}`); await wait(1200); continue; }
-          if (c.fx >= 3) { slot.classList.add('suspense'); for (let k = 0; k < 3 && !skipped; k++) { SFX.shake(2); await wait(220); } slot.classList.remove('suspense'); }
-          if (c.fx >= 4) await specialReveal(ov, o, fx, () => skipped);
-          SFX.flip(); $('.flipper', slot).classList.add('flipped'); slot.classList.add('revealed'); SFX.reveal(Math.floor(c.fx));
+          if (o.eaten) { SFX.tear(); flipSlot(slot); slot.classList.add('revealed'); fx.burst(['#ff4d6d', '#4ade80', '#000'], 60); $('.reveal-label', slot).innerHTML = `<span class="monster-line">The monster ate <b>${esc(c.name)}</b>!</span>`; say(`The monster ate ${c.name}`); await wait(1200); continue; }
+          if (c.fx >= 3) { slot.classList.add('suspense'); for (let k = 0; k < 3 && !skipped; k++) { SFX.shake(2); await wait(220); } }
+          if (c.fx >= 4) { slot.classList.remove('suspense'); await specialReveal(ov, o, fx, () => skipped); await wait(300); }
+          if (skipped) break;
+          SFX.flip(); flipSlot(slot); slot.classList.add('revealed'); SFX.reveal(Math.floor(c.fx));
           if (o.holo) { setTimeout(() => SFX.holo(), 150); fx.burst(RAINBOW, 80, true); } else if (c.fx >= 3) fx.burst([TC[c.tier], '#fff'], 30 + c.ti * 16);
           $('.reveal-label', slot).innerHTML = `<span class="tier-text ${tcls(c.tier)}">${c.tier}</span>${o.holo ? ' <span class="holo-badge static">SKIBIDI</span>' : ''}${newLabel(o.isNew)}${o.monsterDrop ? '<span class="monster-drop">👹 Monster drop</span>' : ''}`;
           say(`Card ${i + 1}: ${c.name}, ${c.tier}${o.holo ? ', skibidi' : ''}${o.isNew ? ', new' : ''}`);
-          await wait(c.fx >= 4 ? 900 : 430);
+          await wait(c.fx >= 4 ? 1000 : 480);
         }
         if (!skipped) await wait(650);
         row.remove();
       } else {
-        await wait(skipped ? 0 : 950); stage.remove();
+        // Many packs: the same jump out of the pack (a handful of backs stand in for all the cards), then straight to the results.
+        if (!fast()) { const row = document.createElement('div'); row.className = 'reveal-row multi'; row.innerHTML = backs(Math.min(10, all.length)); ov.append(row); await jumpOut(row); await wait(450); row.classList.add('leave'); await wait(300); row.remove(); }
+        stage.remove();
         for (const o of sorted) { if (skipped) break; if (o.card.fx >= 4) await specialReveal(ov, o, fx, () => skipped); }
         if (!skipped) { SFX.reveal(Math.floor(sorted[0].card.fx)); }
       }
@@ -815,7 +917,18 @@
     });
   })();
 
-  const PAGES = { imagereq: () => social.pageImageReq(), notifications: () => social.pageNotifications(), friends: () => social.pageFriends(), home: pageHome, collection: pageCollection, index: pageIndex, leaderboard: () => net.pagePlayers(), players: () => net.pagePlayers(), trades: () => net.pageTrades(), trade: () => net.pageTrade(), post: () => net.pagePost(), board: () => net.pageBoard(), profile: pageProfile, options: pageSettings, admin: () => admin.page() };
+  const PAGES = { suggest: () => social.pageSuggest(), imagereq: () => social.pageImageReq(), notifications: () => { pageHome(); social.openBell(); }, friends: () => social.pageFriends(), home: pageHome, collection: pageCollection, index: pageIndex, leaderboard: () => net.pagePlayers(), players: () => net.pagePlayers(), trades: () => net.pageTrades(), trade: () => net.pageTrade(), post: () => net.pagePost(), board: () => net.pageBoard(), profile: pageProfile, options: pageSettings, admin: () => admin.page() };
+  // ---------- admin reset ----------
+  // The admin page can reset one account or everyone (config.resets / config.resetAll = a time). Each device applies it the next time it syncs:
+  // cards, packs opened, score, packs, codes used and trades go back to a brand-new account's values. Name, picture and settings are kept.
+  function checkReset() {
+    if (!S.account) return false; const need = G.needReset(S.account); if (!need || need <= (S.resetAt || 0)) return false;
+    const pid = S.profile.id, mineOpen = net.state.trades.filter((t) => t.from.id === pid);
+    const t = Math.max(Date.now(), need + 1), f = fresh();
+    S = normalize(Object.assign(f, { account: S.account, profile: S.profile, settings: S.settings, started: S.started, resetAt: t, mod: t, syncMod: t - 1 }));
+    save(true); mineOpen.forEach((x) => net.closeIssue(x.num).catch(() => {}));
+    toast('The admin reset everyone\'s progress. You are starting fresh.', true); return true;
+  }
   // ---------- whitelist ----------
   // A new account cannot use the site until the admin approves it (admin page > Players). 'ok' = in, 'pending' = waiting, 'checking' = not known yet.
   const APPR = 'ss-gacha-approved';
@@ -868,7 +981,7 @@
   const ctx = { G, S: () => S, save, toast, modal, closeModal, popOpen, popSet, popClose, popup, esc, $, $$, cardHTML, tilt, avatarHTML, bannerCSS, profileHTML, route, renderHeader, fmt, uid, normalize, hasCopy, takeCopy, addCopy, since, tcls, rarityCmp, busy: () => opening, refreshFeeds: () => refreshFeeds(), notify: function () { return social ? social.notify.apply(null, arguments) : null; },
     setHTML: (el, html) => { if (!el || el.innerHTML === html) return; const y = window.scrollY; el.innerHTML = html; el.classList.add('soft'); window.scrollTo({ top: y, left: 0, behavior: 'instant' }); },
     restore: (j) => { S = normalize(Object.assign({}, j, { account: S.account || null })); save(); location.reload(); },
-    loggedIn: () => !!(auth && auth.loggedIn()), allowed: () => accessState() === 'ok', onSync: () => { if (auth) auth.watch(); if (social) social.scan(); if (auth && auth.loggedIn()) { const a = accessState(); if (a !== lastAccess) route(); } },
+    loggedIn: () => !!(auth && auth.loggedIn()), allowed: () => accessState() === 'ok', checkReset: () => checkReset(), onSync: () => { if (auth) auth.watch(); if (social) social.scan(); if (auth && auth.loggedIn()) { const a = accessState(); if (a !== lastAccess) route(); } },
     fresh, adopt: (j) => { S = normalize(j); save(true); }, rerenderSettings: () => pageSettings(),
     // Bring the account's newer cloud save in. keepLocal = this device has changes the cloud has not seen, so combine instead of replace (never loses a card).
     mergeCloud: (p, keepLocal) => {
@@ -888,9 +1001,10 @@
         next.stats = { opened: Math.max(S.stats.opened, +(raw.stats && raw.stats.opened) || 0), pulls: Math.max(S.stats.pulls, +(raw.stats && raw.stats.pulls) || 0) };
         if (cloudNewer) { ['packs', 'last', 'sinceRare', 'started'].forEach((k) => { if (raw[k] != null) next[k] = raw[k]; }); if (raw.net) next.net = Object.assign({}, raw.net, { done: Object.assign({}, S.net.done, raw.net.done || {}) }); next.profile = Object.assign({}, S.profile, prof); }
         next.syncMod = p.mod; next.mod = Math.max(Date.now(), p.mod + 1);
-        const cs = raw.social || {}, ls = S.social || {}, byId = {}; (cs.notes || []).concat(ls.notes || []).forEach((x) => { if (!x || !x.id) return; const o = byId[x.id]; byId[x.id] = o ? Object.assign({}, o, x, { read: o.read || x.read ? 1 : 0 }) : x; });
+        const cs = raw.social || {}, ls = S.social || {}, byId = {}; (cs.notes || []).concat(ls.notes || []).forEach((x) => { if (!x || !x.id) return; const o = byId[x.id]; byId[x.id] = o ? Object.assign({}, o, x, { read: Math.max(o.read || 0, x.read || 0) }) : x; });
         next.social = { notes: Object.values(byId).sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 60), nseen: Object.assign({}, cs.nseen || {}, ls.nseen || {}), seen: Object.assign({}, cs.seen || {}, ls.seen || {}), badges: ls.badges || cs.badges || null };
       }
+      next.resetAt = Math.max(S.resetAt || 0, p.ra || 0); // never go back to a state from before an admin reset
       S = normalize(next); save(true); renderHeader(); if (!opening) route(true);
     } };
   net = window.SSGNet(ctx);
@@ -908,7 +1022,7 @@
   net.loadCache(); // show admin-made card changes straight away; the online sync refreshes them
   // ---------- auto update ----------
   // version.json holds the newest version number. A tab running an older one reloads itself (after uploading its save), so old tabs do not overwrite newer data.
-  const VERSION = 29;
+  const VERSION = 30;
   async function checkVersion() {
     try {
       const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;

@@ -1,0 +1,161 @@
+/* v30: card page, bell dropdown, steadier summary cards, Good Luck rarity, admin set arrows */
+
+/* points badge removed from the physical cards */
+.card .pts { display: none !important; }
+
+/* summary cards only fade in (a scale animation could freeze a card small); no card ever changes size on hover while a pack is open */
+@keyframes dealfade { from { opacity: 0; } to { opacity: 1; } }
+.summary-grid .card, .summary-grid .card-btn .card { animation-name: dealfade !important; animation-fill-mode: backwards !important; transform-origin: center; }
+.summary-grid .card-btn { transform: none !important; }
+.slot.revealed .flipper { animation: none; }
+.reveal-row.multi .reveal-label { display: none; } .reveal-row.multi { min-height: calc(var(--cw, 150px) * 1.4 + 20px); }
+.reveal-row.leave { opacity: 0; transform: scale(.96); transition: opacity .28s ease, transform .28s ease; }
+
+/* Good Luck */
+.card.t-good-luck { box-shadow: 0 0 22px rgba(255, 225, 77, .45), 0 0 0 1px rgba(255, 225, 77, .7); }
+.card.t-good-luck .tier-badge { background: linear-gradient(90deg, #ffe14d, #7dff9a); color: #1a1500; }
+.slot.revealed.t-good-luck { filter: drop-shadow(0 0 30px #ffe14d); }
+
+/* ---- card page ---- */
+.modal.cardview { width: min(960px, 96vw); max-width: 96vw; padding: 26px 28px; }
+.cv { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1fr); gap: 34px; align-items: start; }
+.cv-left { display: grid; justify-items: center; gap: 16px; }
+.cv-stage { perspective: 1100px; padding: 18px 8px; cursor: grab; touch-action: none; user-select: none; display: grid; place-items: center; }
+.cv-stage:active { cursor: grabbing; }
+.cv-3d { position: relative; width: var(--cw, 260px); aspect-ratio: 5 / 7; transform-style: preserve-3d; transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transition: transform .6s cubic-bezier(.2, .8, .2, 1); filter: drop-shadow(0 24px 30px rgba(0, 0, 0, .55)); }
+.cv-face { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.cv-back { transform: rotateY(180deg); }
+.cv-back .card-back, .cv-front .card { width: 100%; height: 100%; }
+.cv-front .card { --s: 1 !important; }
+.cv-ctl { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.cv-title { margin: 0 0 4px; font-size: clamp(1.4rem, 3vw, 1.9rem); overflow-wrap: anywhere; }
+.cv-tier { font: 800 .85rem var(--display); letter-spacing: .08em; margin-bottom: 14px; }
+.cv-vars { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.cv-dl { display: grid; grid-template-columns: minmax(120px, 190px) 1fr; gap: 9px 18px; margin: 0 0 14px; }
+.cv-dl dt { color: var(--muted); } .cv-dl dd { margin: 0; overflow-wrap: anywhere; }
+.cv-copies { display: flex; flex-wrap: wrap; gap: 4px 12px; } .cv-copies .holo { color: #ffd66b; }
+.cv-blurb { margin: 0 0 14px; line-height: 1.5; }
+@media (max-width: 760px) {
+  .modal.cardview { padding: 18px 16px 22px; max-height: 94vh; overflow-y: auto; }
+  .cv { grid-template-columns: 1fr; gap: 12px; }
+  .cv-stage { padding: 8px 0; } .cv-dl { grid-template-columns: minmax(96px, 120px) 1fr; gap: 7px 12px; font-size: .92rem; }
+}
+
+/* ---- notifications dropdown ---- */
+.bellpanel { position: fixed; z-index: 300; width: min(380px, calc(100vw - 16px)); display: grid; grid-template-rows: auto minmax(0, 1fr); border-radius: 16px; background: var(--panel, #15102b); border: 1px solid var(--line, rgba(255, 255, 255, .14)); box-shadow: 0 18px 50px rgba(0, 0, 0, .6); overflow: hidden; animation: bellin .16s ease-out; }
+@keyframes bellin { from { opacity: 0; transform: translateY(-6px); } }
+.bp-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line, rgba(255, 255, 255, .1)); }
+.bp-btns { display: flex; gap: 6px; }
+.bp-list { overflow-y: auto; overscroll-behavior: contain; display: grid; align-content: start; }
+.bp-empty { padding: 26px 18px; text-align: center; margin: 0; }
+.bellpanel .note { border: 0; border-radius: 0; border-bottom: 1px solid rgba(255, 255, 255, .06); background: none; grid-template-columns: 34px 1fr auto; padding: 10px 14px; transition: opacity .6s ease, background .3s; }
+.bellpanel .note.unread { background: color-mix(in srgb, var(--accent, #8b5cf6) 16%, transparent); }
+.bellpanel .note.read { opacity: .5; }
+.bellpanel .note-ic { width: 34px; height: 34px; font-size: 1.15rem; } .bellpanel .note-txt { font-size: .92rem; }
+.icon-btn.bell { cursor: pointer; }
+body.is-dragging { user-select: none; cursor: grabbing; }
+
+/* ---- admin: set arrows ---- */
+.ad-move { display: inline-flex; gap: 2px; margin-right: 6px; }
+.ad-move button { background: rgba(255, 255, 255, .06); border: 0; color: var(--muted); border-radius: 6px; width: 28px; height: 28px; cursor: pointer; font-size: .7rem; }
+.ad-move button:hover { background: rgba(255, 255, 255, .15); color: #fff; }
+.drag-h { min-width: 32px; min-height: 32px; display: inline-grid; place-items: center; background: none; border: 0; }
+@media (max-width: 520px) { .ad-move button { width: 34px; height: 34px; } .bellpanel { left: 8px !important; right: 8px !important; width: auto; } }
+
+/* ---- glow always sits BEHIND the pack ---- */
+.stage-pack { isolation: isolate; }
+.stage-pack .pack-rays { z-index: -1; }
+.stage-pack.torn::before { z-index: -1 !important; }
+.opening .flash { z-index: 0 !important; background: radial-gradient(circle at 50% 46%, #fff 0, rgba(196, 170, 255, .9) 18%, rgba(120, 245, 170, .35) 38%, transparent 62%) !important; }
+
+/* ---- smoother, more physical tearing ---- */
+.stage-pack { --rip: 0; }
+.stage-pack .bag-top { transform-origin: 50% 100%; transform: perspective(520px) rotateX(calc(var(--rip) * 58deg)) translateY(calc(var(--rip) * -5px)) rotateZ(calc(var(--rip) * -2.2deg)); transition: transform .32s cubic-bezier(.2, .9, .2, 1); will-change: transform; box-shadow: none; }
+.stage-pack.ripping .bag-top { transition: none; box-shadow: none; }
+.stage-pack .bag-body { transition: transform .32s cubic-bezier(.2, .9, .2, 1); }
+.stage-pack.ripping .bag-body { transition: none; transform: translateX(calc(var(--rip) * -3px)) rotate(calc(var(--rip) * -.8deg)) scaleY(calc(1 - var(--rip) * .015)); }
+.stage-pack.torn .bag-top { transition: none; animation: stripfly .8s cubic-bezier(.25, .1, .4, 1) forwards !important; opacity: 1; }
+@keyframes stripfly {
+  0% { transform: perspective(520px) rotateX(58deg) translateY(-5px) rotateZ(-2.2deg); opacity: 1; }
+  35% { transform: perspective(520px) translate(30px, -110px) rotateX(120deg) rotateZ(14deg); opacity: 1; }
+  100% { transform: perspective(520px) translate(120px, -260px) rotateX(330deg) rotateZ(52deg); opacity: 0; }
+}
+.stage-pack.torn .bag-body { animation: bodypop .45s cubic-bezier(.2, 1.4, .4, 1) !important; }
+.stage-pack.torn.emptying .bag-body { animation: packsink .7s ease-in forwards !important; }
+@keyframes bodypop { 0% { transform: scale(.98); } 40% { transform: scale(1.045) translateY(-4px); } 100% { transform: scale(1); } }
+/* the crack that opens along the top as you drag */
+.tear-glint { position: absolute; left: 0; top: 10.2%; height: 3px; width: calc(var(--rip, 0) * 100%); max-width: 100%; z-index: 30; pointer-events: none; border-radius: 3px; opacity: calc(var(--rip, 0) * 4); background: linear-gradient(90deg, rgba(255, 255, 255, .15), #fff 70%, #fff); box-shadow: 0 0 10px 2px rgba(255, 255, 255, .85), 0 0 22px 6px rgba(184, 148, 255, .6); }
+.stage-pack.torn .tear-glint { width: 100%; opacity: 0; transition: opacity .5s .1s; }
+
+/* ---- card names shrink to fit instead of spilling over the card ---- */
+.card-body { min-width: 0; } .card .card-name { height: 2.3em; min-height: 0; overflow: hidden; min-width: 0; overflow-wrap: anywhere; hyphens: auto; }
+.card .card-name.long { font-size: 1.15em; }
+.card-top { min-width: 0; flex-wrap: nowrap; } .card-top .set-tag { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .card-top > * { flex: 0 1 auto; } .card-top .tier-badge { white-space: nowrap; flex-shrink: 0; }
+
+/* ======= holo: the rainbow foil and shine now sit ON TOP of the picture (normal blending), so blacks and whites pick it up too ======= */
+.card.holo .foil { mix-blend-mode: normal; opacity: .3;
+  background:
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, .22) 0 1px, rgba(255, 255, 255, 0) 1px 5px),
+    repeating-linear-gradient(115deg, rgba(255, 60, 150, 0) 0, rgba(255, 70, 160, .9) 5%, rgba(255, 215, 80, .9) 10%, rgba(70, 255, 170, .9) 15%, rgba(70, 170, 255, .9) 20%, rgba(180, 110, 255, .9) 25%, rgba(255, 60, 150, 0) 30%);
+  background-size: 6px 6px, 280% 280%; background-position: 0 0, var(--mx) var(--my); }
+.card.holo.tilting .foil { opacity: .48; }
+.card.holo .art::after { mix-blend-mode: normal; opacity: .3; background: linear-gradient(115deg, rgba(255, 255, 255, 0) 30%, rgba(255, 255, 255, .7) 46%, rgba(255, 255, 255, 0) 62%); background-size: 260% 260%; background-position: var(--mx) var(--my); }
+.card.holo .glare { mix-blend-mode: normal; opacity: .16; background: radial-gradient(circle at var(--mx) var(--my), rgba(255, 255, 255, .75), rgba(255, 255, 255, 0) 45%); }
+.card.holo.tilting .glare { opacity: .5; }
+
+/* ======= account menu (top right) ======= */
+.top-right .me { display: inline-flex; align-items: center; gap: 2px; background: none; border: 0; padding: 0; cursor: pointer; position: relative; border-radius: 50%; }
+.top-right .me.on { box-shadow: 0 0 0 2px var(--accent, #8b5cf6); }
+.me-caret { display: none; }
+.me-n { position: absolute; top: -4px; right: -4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: #ff4d6d; color: #fff; font: 700 .64rem/16px var(--display); text-align: center; box-shadow: 0 0 0 2px var(--bg, #0d0720); }
+.profpanel { position: fixed; z-index: 310; width: min(280px, calc(100vw - 16px)); padding: 8px; border-radius: 16px; background: var(--panel, #15102b); border: 1px solid var(--line, rgba(255, 255, 255, .14)); box-shadow: 0 18px 50px rgba(0, 0, 0, .6); animation: bellin .16s ease-out; }
+.pp-user { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 10px 10px 12px; border-bottom: 1px solid rgba(255, 255, 255, .08); margin-bottom: 6px; }
+.pp-user b { display: block; font-size: 1.05rem; overflow-wrap: anywhere; } .pp-user small { display: block; }
+.pp-gear { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 10px; color: var(--muted); text-decoration: none; font-size: 1.15rem; } .pp-gear:hover { background: rgba(255, 255, 255, .1); color: #fff; }
+.pp-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 11px 12px; border: 0; border-radius: 10px; background: none; color: inherit; font: inherit; text-decoration: none; cursor: pointer; text-align: left; }
+.pp-item:hover, .pp-item:focus-visible { background: rgba(255, 255, 255, .08); outline: none; }
+.pp-item .nbadge { margin-left: auto; }
+.pp-sep { height: 1px; background: rgba(255, 255, 255, .08); margin: 6px 4px; }
+.pp-out { color: #ff7a8a; }
+
+/* ======= message dock: round button bottom right, a panel above it ======= */
+.msgdock { position: fixed; right: 20px; bottom: 20px; z-index: 280; display: flex; flex-direction: column; align-items: flex-end; gap: 12px; pointer-events: none; }
+.msgdock > * { pointer-events: auto; }
+.dock-pill { width: 56px; height: 56px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, .2); background: linear-gradient(145deg, var(--accent, #8b5cf6), #5b2fd0); color: #fff; font-size: 1.5rem; cursor: pointer; display: grid; place-items: center; position: relative; box-shadow: 0 10px 28px rgba(0, 0, 0, .55); transition: transform .15s; }
+.dock-pill:hover { transform: translateY(-2px) scale(1.04); } .dock-pill span { display: none; }
+.dock-n { position: absolute; top: -4px; right: -4px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 999px; background: #ff4d6d; color: #fff; font: 700 .72rem/20px var(--display); text-align: center; box-shadow: 0 0 0 2px var(--bg, #0d0720); }
+.msgdock:has(.dock-panel) .dock-pill { display: none; }
+.dock-panel { width: min(370px, calc(100vw - 24px)); height: min(540px, calc(100vh - 110px)); display: flex; flex-direction: column; border-radius: 16px; background: var(--panel, #15102b); border: 1px solid var(--line, rgba(255, 255, 255, .14)); box-shadow: 0 18px 50px rgba(0, 0, 0, .65); overflow: hidden; animation: bellin .18s ease-out; }
+.dk-head { display: flex; align-items: center; gap: 10px; padding: 12px; border-bottom: 1px solid rgba(255, 255, 255, .08); }
+.dk-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dk-b { width: 34px; height: 34px; border-radius: 9px; border: 1px solid rgba(255, 255, 255, .14); background: rgba(255, 255, 255, .05); color: inherit; cursor: pointer; font-size: 1.05rem; display: inline-grid; place-items: center; text-decoration: none; flex: none; } .dk-b:hover { background: rgba(255, 255, 255, .12); }
+.dk-list, .dk-form { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 8px; display: grid; align-content: start; gap: 4px; }
+.dk-form { padding: 14px; gap: 10px; }
+.dk-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; padding: 9px 10px; border: 0; border-radius: 12px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; } .dk-row:hover { background: rgba(255, 255, 255, .07); }
+.dk-name { min-width: 0; display: grid; } .dk-name b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dk-grp { width: 36px; height: 36px; border-radius: 50%; background: rgba(255, 255, 255, .08); display: inline-grid; place-items: center; }
+.dk-empty { padding: 20px 12px; text-align: center; }
+.dk-pick { display: grid; gap: 4px; max-height: 190px; overflow-y: auto; } .dk-check { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; cursor: pointer; } .dk-check:hover { background: rgba(255, 255, 255, .06); }
+.dk-members { display: grid; gap: 6px; } .dk-mem { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: center; }
+.dock-panel .chat-log { flex: 1; border: 0; border-radius: 0; background: rgba(0, 0, 0, .2); }
+.dock-panel .chat-send { padding: 10px; border-top: 1px solid rgba(255, 255, 255, .08); align-items: flex-end; }
+.dock-panel .chat-send textarea { flex: 1; min-width: 0; resize: none; max-height: 96px; font: inherit; color: inherit; background: rgba(255, 255, 255, .05); border: 1px solid rgba(255, 255, 255, .14); border-radius: 12px; padding: 10px 12px; }
+.msg-from { display: block; font-size: .72rem; opacity: .75; margin-bottom: 2px; }
+@media (max-width: 600px) { .msgdock { right: 12px; bottom: calc(76px + env(safe-area-inset-bottom, 0px)); } .dock-panel { width: calc(100vw - 24px); height: min(70vh, 560px); } .profpanel { right: 8px !important; } }
+
+/* ======= pack tearing v2: the top strip is cut into slices that peel up one after another along your drag, with a glowing opening under them ======= */
+.tearstrip { position: absolute; left: 0; right: 0; top: 0; height: 11%; z-index: 2; perspective: 560px; transform-style: preserve-3d; pointer-events: none; }
+.ts { position: absolute; inset: 0; transform-origin: 50% 100%; backface-visibility: visible;
+  --t: clamp(0, calc(var(--rip, 0) * 14 - var(--i)), 1);
+  transform: translateY(calc(var(--t) * -7px)) rotateX(calc(var(--t) * (-28deg - var(--rip, 0) * 34deg))) rotateZ(calc(var(--t) * (var(--i) - 6.5) * .7deg)); }
+.stage-pack.ripping .ts { transition: none; }
+.ts .bag-top { display: block !important; position: absolute; left: 0; right: 0; top: 0; height: 100% !important; transform: none !important; animation: none !important; transition: none !important; opacity: 1 !important; }
+.ts .bag-top::after { content: 'TEAR HERE ›'; }
+.pack-slot { position: absolute; left: 2.5%; right: 2.5%; top: 8.2%; height: 4.2%; z-index: 1; pointer-events: none; opacity: clamp(0, calc(var(--rip, 0) * 3), 1);
+  background: linear-gradient(180deg, #0c0418 0%, #4a22b8 50%, #fff 100%); box-shadow: 0 -4px 16px rgba(190, 150, 255, .9), 0 0 26px 4px rgba(255, 255, 255, .45); }
+.stage-pack.torn .ts { animation: tsfly .9s cubic-bezier(.3, .1, .5, 1) forwards; animation-delay: calc(var(--i) * 22ms); }
+@keyframes tsfly { to { transform: translate(calc((var(--i) - 6.5) * 26px), -320px) rotateX(-200deg) rotateZ(calc((var(--i) - 6.5) * 34deg)); opacity: 0; } }
+.stage-pack.torn .pack-slot { animation: slotburst .7s ease-out forwards; }
+@keyframes slotburst { 0% { opacity: 1; transform: scaleY(1); } 40% { opacity: 1; transform: scaleY(2.4); box-shadow: 0 -10px 40px rgba(255, 255, 255, .95), 0 0 60px 14px rgba(190, 150, 255, .8); } 100% { opacity: 0; transform: scaleY(1); } }
+.stage-pack .tear-glint { top: 10.6%; height: 2px; }
+html.modal-open .msgdock, .opening ~ .msgdock { display: none; }

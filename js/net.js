@@ -13,7 +13,7 @@
     const G = ctx.G, BYID = G.BYID, CARDS = G.CARDS, esc = ctx.esc, $ = ctx.$, $$ = ctx.$$;
     const S = () => ctx.S();
     const LS = 'ss-gacha-net', EVERY = 60000, ONLINE_MS = 150000, BEAT_MS = 240000, MAX_BODY = 64000;
-    const net = { dir: [], trades: [], accounts: [], grants: [], redeems: [], board: [], cfg: G.cleanConfig(null), cfgNum: 0, imgNum: {}, cfgKey: '', status: 'off', msg: '', last: 0, busy: false, lastKey: '', lastBeat: 0, createdAt: 0, loaded: false, cfgChanged: false, friends: [], complete: false, sig: '', imgreqs: [] };
+    const net = { dir: [], trades: [], accounts: [], grants: [], redeems: [], board: [], cfg: G.cleanConfig(null), cfgNum: 0, imgNum: {}, cfgKey: '', status: 'off', msg: '', last: 0, busy: false, lastKey: '', lastBeat: 0, createdAt: 0, loaded: false, cfgChanged: false, friends: [], complete: false, sig: '', imgreqs: [], suggs: [], groups: [] };
     const BOARD_MS = 7 * 86400000, BOARD_MAX = 3, BOARD_CARDS = 8;
     const CFG_CACHE = 'ss-gacha-cfg';
     const view = { by: 'score', q: '' };
@@ -45,6 +45,7 @@
         const e = new Error(r.status === 401 ? 'Token rejected (401)' : r.status === 403 || r.status === 429 ? 'GitHub rate limit or permission problem (' + r.status + ')' : r.status === 404 ? 'Repo or issue not found (404). Check the repo name and token access.' : 'GitHub error ' + r.status);
         e.status = r.status; throw e;
       }
+      const rem = r.headers && r.headers.get('x-ratelimit-remaining'); if (rem != null && rem !== '') net.rl = { rem: +rem, at: Date.now() };
       return r.status === 204 ? null : r.json();
     }
 
@@ -62,9 +63,9 @@
       const cards = {};
       if (b.cards && typeof b.cards === 'object') Object.keys(b.cards).forEach((cid) => { const a = b.cards[cid]; if (BYID[cid] && Array.isArray(a) && +a[0] > 0) { const n = Math.min(9999, +a[0] | 0); cards[cid] = { n: n, h: Math.min(n, Math.max(0, +a[1] | 0)), f: a[2] ? 1 : 0, t: +a[3] || 0, l: +a[4] || 0 }; } });
       const wish = Array.isArray(b.wish) ? b.wish.filter((x) => typeof x === 'string' && BYID[x]).slice(0, 300) : [];
-      const wk = b.wk && +b.wk.t === weekStart(Date.now()) ? Math.max(0, +b.wk.s || 0) : null;
+      const wk = b.wk && +b.wk.t === weekStart(Date.now()) && +b.wk.v === 2 ? Math.max(0, +b.wk.s || 0) : null; // v2 = baseline taken with the 10-point scoring
       const pl = derive({ id: id, name: nm(b.name), hue: Number.isFinite(+b.hue) ? ((+b.hue % 360) + 360) % 360 : 28, pfp: okImg(b.pfp), banner: okImg(b.banner), joined: +b.joined || 0, seen: +b.seen || 0,
-        mod: +(b.save && b.save.mod) || +b.seen || 0, opened: +(b.opened) || 0, pulls: +(b.pulls) || 0, cards: cards, num: num, full: true, raw: b.save && typeof b.save === 'object' ? b.save : null });
+        mod: +(b.save && b.save.mod) || +b.seen || 0, opened: +(b.opened) || 0, pulls: +(b.pulls) || 0, ra: +b.ra || 0, cards: cards, num: num, full: true, raw: b.save && typeof b.save === 'object' ? b.save : null });
       pl.show = Array.isArray(b.show) ? b.show.filter((x) => typeof x === 'string' && /\|[01]$/.test(x)).slice(0, 5) : [];
       pl.wish = wish; pl.week = wk == null ? 0 : Math.max(0, pl.score - wk); pl.bio = String(b.bio == null ? '' : b.bio).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 120);
       return pl;
@@ -91,17 +92,37 @@
       try { localStorage.setItem(CFG_CACHE, JSON.stringify({ cfg: net.cfg, imgs: keep })); }
       catch (e) { try { localStorage.setItem(CFG_CACHE, JSON.stringify({ cfg: net.cfg, imgs: {} })); } catch (e2) { /* ignore */ } }
     }
-    async function refresh() {
-      const c = conf(); let all = [], done = false;
-      for (let page = 1; page <= 30; page++) {
-        const r = await gh('GET', `/repos/${c.repo}/issues?state=open&per_page=100&page=${page}`);
-        all = all.concat(r.filter((i) => !i.pull_request)); if (r.length < 100) { done = true; break; }
+    // Reading everything every time was slow. Now: a full read every 3 minutes, and in between only the issues that changed since the last
+    // read (state=all so closed ones can be dropped). That is one tiny request, so we can poll every few seconds.
+    let cache = null, sinceMax = '', lastFull = 0;
+    const isoBack = (t, ms) => new Date(Date.parse(t) - ms).toISOString().replace(/\.\d+Z$/, 'Z');
+    async function listIssues(full) {
+      const c = conf();
+      if (!cache || full || Date.now() - lastFull > 180000) {
+        let all = [], done = false;
+        for (let page = 1; page <= 30; page++) {
+          const r = await gh('GET', `/repos/${c.repo}/issues?state=open&per_page=100&page=${page}`);
+          all = all.concat(r.filter((i) => !i.pull_request)); if (r.length < 100) { done = true; break; }
+        }
+        net.complete = done; // false = there are more open issues than we read; absent things must then NOT be taken to mean "deleted"
+        const m = new Map(); all.forEach((i) => { m.set(i.number, i); if (i.updated_at && i.updated_at > sinceMax) sinceMax = i.updated_at; });
+        cache = m; lastFull = Date.now();
+        if (!sinceMax) sinceMax = new Date().toISOString();
+      } else {
+        for (let page = 1; page <= 5; page++) {
+          const r = await gh('GET', `/repos/${c.repo}/issues?state=all&sort=updated&direction=asc&since=${encodeURIComponent(isoBack(sinceMax, 20000))}&per_page=100&page=${page}`);
+          r.forEach((i) => { if (i.pull_request) return; if (i.state === 'closed') cache.delete(i.number); else cache.set(i.number, i); if (i.updated_at && i.updated_at > sinceMax) sinceMax = i.updated_at; });
+          if (r.length < 100) break; if (page === 5) lastFull = 0; // a flood of changes: read everything next time
+        }
       }
-      net.complete = done; // false = there are more open issues than we read; absent things must then NOT be taken to mean "deleted"
+      return Array.from(cache.values()).sort((a, b) => b.number - a.number);
+    }
+    async function refresh() {
+      const c = conf(); const all = await listIssues(false);
       const parsed = [];
       all.forEach((i) => { let b; try { b = JSON.parse(i.body); } catch (e) { return; } if (b && typeof b === 'object') parsed.push({ i: i, b: b }); });
       // 1) admin config, card pictures and accounts first, so custom cards exist before players are read
-      let cfgIssue = null; const imgs = {}, imgNum = {}, accounts = {}, grants = [], redeems = [], seenRd = {}, board = [], friends = [], imgreqs = [];
+      let cfgIssue = null; const imgs = {}, imgNum = {}, accounts = {}, grants = [], redeems = [], seenRd = {}, board = [], friends = [], imgreqs = [], suggs = [], groups = [];
       parsed.forEach((x) => {
         const b = x.b, num = x.i.number;
         if (b.t === 'config') { if (!cfgIssue || num < cfgIssue.num) cfgIssue = { num: num, b: b }; }
@@ -113,6 +134,8 @@
         }
         else if (b.t === 'board' && idOk(b.pid)) { const ok = (a) => (Array.isArray(a) ? a.filter((x) => typeof x === 'string' && BYID[x.replace(/\|[01]$/, '')]).map((x) => (/\|0$/.test(x) ? x.slice(0, -2) : x)).slice(0, BOARD_CARDS) : []), want = ok(b.want), offer = ok(b.offer); if ((want.length || offer.length) && Date.now() - (+b.at || 0) < BOARD_MS) board.push({ num: num, id: String(b.id || num).slice(0, 24), pid: b.pid, name: nm(b.name), want: want, offer: offer, note: String(b.note || '').replace(/[\r\n\t]+/g, ' ').slice(0, 100), at: +b.at || 0, ccount: +x.i.comments || 0 }); }
         else if (b.t === 'imgreq' && idOk(b.id) && idOk(b.pid) && typeof b.card === 'string') { imgreqs.push({ id: b.id, num: num, card: b.card.slice(0, 120), pid: b.pid, name: nm(b.name), img: okImg(b.img), note: String(b.note || '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 120), at: +b.at || 0, status: ['pending', 'approved', 'rejected'].indexOf(b.status) >= 0 ? b.status : 'pending' }); }
+        else if (b.t === 'sugg' && idOk(b.id) && idOk(b.pid) && b.card && typeof b.card === 'object') { const k = b.card; suggs.push({ id: b.id, num: num, pid: b.pid, name: nm(b.name), card: { name: String(k.name || '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 40), cat: String(k.cat || '').slice(0, 12), newCat: String(k.newCat || '').replace(/\s+/g, ' ').trim().slice(0, 12), blurb: String(k.blurb || '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 90), tier: String(k.tier || '').slice(0, 14) }, img: okImg(b.img), note: String(b.note || '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 160), at: +b.at || 0, status: ['pending', 'approved', 'rejected'].indexOf(b.status) >= 0 ? b.status : 'pending' }); }
+        else if (b.t === 'group' && idOk(b.id) && idOk(b.owner) && Array.isArray(b.members)) { const mem = b.members.slice(0, 20).filter((m) => m && idOk(m.id)).map((m) => ({ id: m.id, name: nm(m.name) })); if (mem.length) groups.push({ gid: b.id, num: num, name: String(b.name || 'Group').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 30) || 'Group', owner: b.owner, members: mem, ccount: +x.i.comments || 0, at: +b.at || 0 }); }
         else if (b.t === 'friend' && idOk(b.id) && b.from && b.to && idOk(b.from.id) && idOk(b.to.id)) { friends.push({ fid: b.id, num: num, from: { id: b.from.id, name: nm(b.from.name) }, to: { id: b.to.id, name: nm(b.to.name) }, status: ['pending', 'accepted', 'declined'].indexOf(b.status) >= 0 ? b.status : 'pending', at: +b.at || 0, ccount: +x.i.comments || 0 }); }
         else if (b.t === 'redeem' && typeof b.code === 'string' && idOk(b.pid)) { const k = b.pid + '|' + b.code; if (!seenRd[k]) { seenRd[k] = 1; redeems.push({ code: b.code.toUpperCase().slice(0, 24), pid: b.pid, name: nm(b.name), at: +b.at || 0 }); } }
         else if (b.t === 'account' && b.v === 2 && typeof b.did === 'string' && /^\d{15,19}$/.test(b.did) && idOk(b.pid)) {
@@ -134,11 +157,12 @@
         if (b.t === 'player') { const p = cleanPlayer(b, num); if (p && !blocked[p.id] && (!players[p.id] || players[p.id].num > p.num)) players[p.id] = p; }
         else if (b.t === 'trade') { const t = cleanTrade(b, num); if (t && !blocked[t.from.id] && !blocked[t.to.id]) trades.push(t); }
       });
-      net.dir = Object.keys(players).map((k) => { const p = players[k]; p.acct = byPid[p.id] ? byPid[p.id].u : null; return p; }); net.trades = trades; net.last = Date.now(); net.loaded = true;
-      net.imgreqs = imgreqs.filter((r) => !blocked[r.pid]);
-      net.friends = friends.filter((f) => !blocked[f.from.id] && !blocked[f.to.id]);
+      net.dir = Object.keys(players).map((k) => { const p = players[k]; p.acct = byPid[p.id] ? byPid[p.id].u : null; const need = byPid[p.id] ? G.needReset(byPid[p.id].k) : 0; if (need && (p.ra || 0) < need) { p.cards = {}; p.opened = 0; p.pulls = 0; p.show = []; p.wish = []; p.week = 0; derive(p); } return p; }); net.trades = trades; net.last = Date.now(); net.loaded = true;
+      net.imgreqs = imgreqs.filter((r) => !blocked[r.pid]); net.suggs = suggs.filter((r) => !blocked[r.pid]); net.groups = groups;
+      const fseen = {}; friends.sort((a, b) => a.num - b.num); const fdedup = friends.filter((f) => { if (fseen[f.fid]) { if (f.from.id === S().profile.id) closeIssue(f.num).catch(() => {}); return false; } fseen[f.fid] = 1; return true; }); // one issue per pair
+      net.friends = fdedup.filter((f) => !blocked[f.from.id] && !blocked[f.to.id]);
       // fingerprint of everything a page might show (not the "last seen" clock), so quiet redraws only happen when something really changed
-      net.sig = net.dir.map((p) => p.id + ':' + p.mod + ':' + p.score + ':' + p.opened).join(',') + '|' + trades.map((t) => t.id + t.status).join(',') + '|' + net.board.map((b) => b.num + ':' + b.ccount).join(',') + '|' + net.friends.map((f) => f.fid + f.status + f.ccount).join(',');
+      net.sig = net.dir.map((p) => p.id + ':' + p.mod + ':' + p.score + ':' + p.opened).join(',') + '|' + trades.map((t) => t.id + t.status).join(',') + '|' + net.board.map((b) => b.num + ':' + b.ccount).join(',') + '|' + net.friends.map((f) => f.fid + f.status + f.ccount).join(',') + '|' + groups.map((g) => g.gid + g.ccount + g.members.length).join(',');
     }
     // Admin writes. Re-reads the config issue first so two edits do not overwrite each other.
     async function updateConfig(fn, note) {
@@ -188,8 +212,8 @@
     function build() {
       const s = S(), p = s.profile, cards = {};
       Object.keys(s.cards).forEach((id) => { const e = s.cards[id]; if (BYID[id] && e.n > 0) cards[id] = [e.n, e.h || 0, e.f ? 1 : 0, e.t || 0, e.l || 0]; });
-      const ws = weekStart(Date.now()); if (!s.wk || s.wk.t < ws) s.wk = { t: ws, s: G.scoreOf(s.cards) };
-      return { t: 'player', v: 1, id: p.id, name: p.name, bio: p.bio || '', hue: p.hue, pfp: p.pfp, banner: p.banner, joined: p.joined, seen: Date.now(), opened: s.stats.opened, pulls: s.stats.pulls, cards: cards, wish: Object.keys(s.wish || {}).filter((x) => BYID[x]).slice(0, 300), wk: s.wk, show: s.showcase || [],
+      const ws = weekStart(Date.now()); if (!s.wk || s.wk.t < ws || s.wk.v !== 2) s.wk = { t: ws, s: G.scoreOf(s.cards), v: 2 };
+      return { t: 'player', v: 1, ra: s.resetAt || 0, id: p.id, name: p.name, bio: p.bio || '', hue: p.hue, pfp: p.pfp, banner: p.banner, joined: p.joined, seen: Date.now(), opened: s.stats.opened, pulls: s.stats.pulls, cards: cards, wish: Object.keys(s.wish || {}).filter((x) => BYID[x]).slice(0, 300), wk: s.wk, show: s.showcase || [],
         save: { wish: s.wish || {}, wk: s.wk, showcase: s.showcase || [], mod: s.mod || 0, granted: s.granted, packs: s.packs, bonus: s.bonus || 0, last: s.last, sinceRare: s.sinceRare, started: s.started, stats: s.stats, codes: s.codes, net: s.net, social: s.social } };
     }
     // Uploads this device's save to the account's player issue. s.syncMod remembers which version the cloud holds, so a stale device can tell it must merge first.
@@ -241,6 +265,7 @@
       if (ctx.busy() || s.overwrite || !mine || !mine.full) return false;
       const cm = mine.mod || 0;
       if (cm <= (s.syncMod || 0)) return false;
+      if (G.needReset(s.account) > (mine.ra || 0)) return false; // the online copy is from before an admin reset: it gets overwritten, never merged back in
       const localChanged = (s.mod || 0) > (s.syncMod || 0) || (!s.mod && !s.syncMod && Object.keys(s.cards).length > 0);
       ctx.mergeCloud(mine, localChanged || !mine.raw);
       return true;
@@ -278,7 +303,7 @@
     function touch() {
       if (!enabled()) return; clearTimeout(touchT);
       const go = () => { if (net.busy) { touchT = setTimeout(go, 800); return; } cycle(true); };
-      touchT = setTimeout(go, 1000);
+      touchT = setTimeout(go, 300);
     }
     // The tab is closing or going to the background: push anything not yet uploaded.
     function flush() {
@@ -382,7 +407,7 @@
       try {
         if (!enabled()) { await fallback(); net.status = 'off'; net.msg = ''; }
         else {
-          await refresh(); changedFlag = settle(); if (changedFlag) ctx.save();
+          await refresh(); if (ctx.checkReset && ctx.checkReset()) changedFlag = true; changedFlag = settle() || changedFlag; if (changedFlag) ctx.save();
           await flushQ(); if (ctx.loggedIn() && ctx.allowed()) { if (reconcile()) changedFlag = true; if (applyGrants()) changedFlag = true; await publish(force); closeGrants(); }
           net.status = 'ok'; net.msg = '';
         }
@@ -399,7 +424,7 @@
     function paint() {
       const d = $('[data-netdot]'); if (d) { d.className = 'netdot ' + net.status; d.title = statusText(); }
       const n = incoming().length; $$('[data-tradebadge]').forEach((b) => { b.hidden = !n; b.textContent = n; });
-      if (ctx.social) { const u = ctx.social.unread(), fr = ctx.social.friendAlerts(); $$('[data-notebadge]').forEach((b) => { b.hidden = !u; b.textContent = u > 99 ? '99+' : u; }); $$('[data-friendbadge]').forEach((b) => { b.hidden = !fr; b.textContent = fr; }); }
+      if (ctx.social) { ctx.social.dockPaint(); const u = ctx.social.unread(), fr = ctx.social.friendAlerts(); $$('[data-notebadge]').forEach((b) => { b.hidden = !u; b.textContent = u > 99 ? '99+' : u; }); $$('[data-friendbadge]').forEach((b) => { b.hidden = !fr; b.textContent = fr; }); }
       const st = $('#plstatus'); if (st) st.textContent = statusText();
       const ss = $('#netstatus'); if (ss) ss.textContent = statusText();
     }
@@ -426,7 +451,7 @@
         Object.keys(cards).forEach((id) => { const c = BYID[id], e = cards[id]; if (c && e && e.n > 0 && c.fx >= 4 && e.l) out.push({ id: p.id, name: mine ? S().profile.name : p.name, card: c, at: e.l, holo: e.h > 0 }); });
       });
       if (!sawMe && ctx.loggedIn()) Object.keys(S().cards).forEach((id) => { const c = BYID[id], e = S().cards[id]; if (c && e && e.n > 0 && c.fx >= 4 && e.l) out.push({ id: me, name: S().profile.name, card: c, at: e.l, holo: e.h > 0 }); });
-      return out.sort((a, b) => b.at - a.at).slice(0, limit || 12);
+      const fc = G.feedClear().pulls; return out.filter((x) => x.at > fc).sort((a, b) => b.at - a.at).slice(0, limit || 12);
     }
     const TABS = [['score', 'Most points'], ['unique', 'Most unique cards'], ['opened', 'Most packs opened'], ['week', 'This week']];
     const shown = () => net.dir.filter((p) => (p.acct || !net.loaded || !enabled()) && (!p.acct || !net.loaded || approvedPid(p.id)));
@@ -731,8 +756,11 @@
         const a = t.dataset.net, id = t.dataset.id;
         if (a === 'trade') openTrade(id); else if (a === 'accept') accept(id); else if (a === 'decline') decline(id); else if (a === 'gift') openTrade(id, { gift: true }); else if (a === 'counter') { const t = net.trades.find((x) => x.id === id); if (t) openTrade(t.from.id, { give: t.want, want: t.give, replace: id }); } else if (a === 'cancel') cancel(id);
       });
-      setInterval(() => { if (!document.hidden) cycle(); }, EVERY);
-      document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - net.last > 15000) cycle(); });
+      // Poll every few seconds while the tab is open. GitHub reports how much of the shared token's budget is left, and we slow down when it runs low.
+      const delay = () => { const r = net.rl; return !r ? 5000 : r.rem < 150 ? 60000 : r.rem < 600 ? 20000 : r.rem < 1500 ? 10000 : 5000; };
+      const loop = () => setTimeout(async () => { if (!document.hidden) { try { await cycle(); } catch (e) { /* retried */ } } loop(); }, delay());
+      loop();
+      document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - net.last > 3000) cycle(); });
       addEventListener('pagehide', flush); document.addEventListener('visibilitychange', () => { if (document.hidden) flush(); });
       paint(); setTimeout(() => cycle(true), 600);
     }
