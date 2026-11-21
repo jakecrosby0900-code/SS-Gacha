@@ -234,8 +234,7 @@
     const hd = $('#header'), html = `<a class="logo" href="#home">${BOLT}<span>Special Strike <b>Gacha</b></span></a>
       <nav class="main" aria-label="Main">${NAV.filter((n) => n[3]).map((n) => navLink(n, cur)).join('')}<button type="button" class="nav-more${NAV.some(([h, , , pri]) => !pri && h === cur) ? ' on' : ''}" data-act="nav-more" aria-expanded="false" style="order:${NAV.length}"><span class="ni" aria-hidden="true">⋯</span><span class="nl">More</span></button><div class="more-sheet">${NAV.filter((n) => !n[3]).map((n) => navLink(n, cur)).join('')}</div></nav>
       <div class="top-right"><a class="chip" href="#home" title="Packs ready"><span class="pk"></span><b data-hud="packs">${S.packs}</b><small class="muted">/ ${D().cap}</small><i class="bonus-mini" data-hud-bonus title="Bonus packs from codes and gifts">${S.bonus ? '+' + S.bonus : ''}</i></a>
-        <button type="button" class="icon-btn bell" data-bell aria-haspopup="true" aria-expanded="false" aria-label="Notifications" title="Notifications">🔔<b class="bell-n" data-notebadge hidden></b></button><button type="button" class="me${MENU_PAGES.indexOf(cur) >= 0 ? ' on' : ''}" data-prof aria-haspopup="true" aria-expanded="false" title="${esc(S.profile.name)}: account menu">${avatarHTML(32)}<i class="netdot" data-netdot></i><b class="me-n" data-friendbadge hidden></b><span class="me-caret" aria-hidden="true">▾</span></button>
-        <button class="icon-btn" data-act="toggle-sound" aria-label="Sound ${S.settings.sound ? 'on' : 'off'}" title="Sound">${S.settings.sound ? '🔊' : '🔇'}</button></div>`;
+        <button type="button" class="icon-btn bell" data-bell aria-haspopup="true" aria-expanded="false" aria-label="Notifications" title="Notifications">🔔<b class="bell-n" data-notebadge hidden></b></button><button type="button" class="me${MENU_PAGES.indexOf(cur) >= 0 ? ' on' : ''}" data-prof aria-haspopup="true" aria-expanded="false" title="${esc(S.profile.name)}: account menu">${avatarHTML(32)}<i class="netdot" data-netdot></i><b class="me-n" data-friendbadge hidden></b><span class="me-caret" aria-hidden="true">▾</span></button></div>`;
     if (hd.dataset.sig !== html) { hd.innerHTML = html; hd.dataset.sig = html; } // unchanged header is left alone (no flicker, open menus stay open)
     if (net) net.paint();
   }
@@ -1022,7 +1021,7 @@
   net.loadCache(); // show admin-made card changes straight away; the online sync refreshes them
   // ---------- auto update ----------
   // version.json holds the newest version number. A tab running an older one reloads itself (after uploading its save), so old tabs do not overwrite newer data.
-  const VERSION = 30;
+  const VERSION = 39;
   async function checkVersion() {
     try {
       const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;

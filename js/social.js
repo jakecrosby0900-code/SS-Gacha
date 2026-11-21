@@ -398,21 +398,38 @@
     function pageSuggest() {
       const mine = net.state.suggs.filter((r) => r.pid === me());
       const sets = Object.keys(G.CATS).filter((k) => !G.CATS[k].monster), tiers = G.TIERS.filter((t) => G.TIER_KEY[t] !== 'Monster');
+      const tkey = (t) => String(G.TIER_KEY[t] || t).toLowerCase().replace(/[^a-z]/g, '');
       ctx.setHTML($('#main'), `<div class="row wrap between"><h1>Suggest a card</h1><a class="btn sm" href="#options">← Settings</a></div>
-        <p class="muted">Have an idea for a card that is not in the game, or a whole new set? Send it here. An admin looks at it and, if it is approved, it is added for everyone. You can send as many as you like.</p>
-        <section class="panel"><form id="sgForm" class="sg-form" autocomplete="off">
-          <label class="f">Card name<input id="sgName" maxlength="40" required placeholder="e.g. Glitched Freddy"></label>
-          <div class="row wrap"><label class="f">Set<select id="sgCat">${sets.map((k) => `<option>${esc(k)}</option>`).join('')}<option value="__new">➕ A new set…</option></select></label>
-          <label class="f">Rarity you think it should be<select id="sgTier">${tiers.map((t) => `<option>${esc(t)}</option>`).join('')}</select></label></div>
-          <div id="sgNew" hidden class="row wrap"><label class="f">New set name<input id="sgNewCat" maxlength="12" placeholder="Up to 12 letters"></label><label class="f grow">What is the set about? (optional)<input id="sgBlurb" maxlength="90"></label></div>
-          <label class="f">Picture (optional)<input id="sgFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif"></label>
-          <div id="sgPrev"></div>
-          <label class="f">Note for the admin (optional)<input id="sgNote" maxlength="160" placeholder="Where it is from, why it fits…"></label>
-          <p class="auth-err" id="sgErr" role="alert"></p><div class="row"><button class="btn primary" id="sgSend" type="submit">Send suggestion</button></div></form></section>
+        <p class="muted sg-intro">Have an idea for a card that is not in the game, or a whole new set? Build it below and watch the card take shape. An admin reviews it and, if approved, it is added for everyone. Send as many as you like.</p>
+        <form id="sgForm" class="sg-wrap" autocomplete="off">
+          <div class="sg-steps">
+            <section class="panel sg-step"><h2><i>1</i> The card</h2>
+              <label class="f">Name<input id="sgName" maxlength="40" required placeholder="e.g. Glitched Freddy"></label>
+              <label class="f"><span>Picture <span class="muted small">(optional)</span></span><span class="sg-drop"><input id="sgFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif"><span id="sgPrev" class="muted small">PNG, JPG, WebP or GIF. It is cropped to fit the card.</span></span></label></section>
+            <section class="panel sg-step"><h2><i>2</i> Where it belongs</h2>
+              <label class="f">Set<select id="sgCat">${sets.map((k) => `<option>${esc(k)}</option>`).join('')}<option value="__new">➕ A new set…</option></select></label>
+              <div id="sgNew" hidden class="sg-newset"><label class="f">New set name<input id="sgNewCat" maxlength="12" placeholder="Up to 12 letters"></label><label class="f"><span>What is the set about? <span class="muted small">(optional)</span></span><input id="sgBlurb" maxlength="90"></label></div>
+              <div class="f"><span>Rarity you think it should be</span><input type="hidden" id="sgTier" value="${esc(tiers[0])}"><div class="sg-tiers" role="radiogroup" aria-label="Rarity">${tiers.map((t, i) => `<button type="button" class="sg-tier${i ? '' : ' on'}" role="radio" aria-checked="${i ? 'false' : 'true'}" data-tier="${esc(t)}" style="--tc:var(--t-${tkey(t)}, var(--accent, #8b5cf6))">${esc(t)}</button>`).join('')}</div></div></section>
+            <section class="panel sg-step"><h2><i>3</i> Anything else?</h2>
+              <label class="f"><span>Note for the admin <span class="muted small">(optional)</span></span><input id="sgNote" maxlength="160" placeholder="Where it is from, why it fits…"></label>
+              <p class="auth-err" id="sgErr" role="alert"></p><div class="row"><button class="btn primary" id="sgSend" type="submit">Send suggestion</button></div></section>
+          </div>
+          <aside class="sg-side"><div class="sg-preview"><span class="eyebrow">LIVE PREVIEW</span><div id="sgCard"></div><p class="muted small" id="sgCap"></p></div></aside>
+        </form>
         ${mine.length ? `<section class="panel"><h2>Your suggestions <span class="muted small">${mine.length}</span></h2><div class="fr-grid">${mine.map((r) => `<div class="fr-row"><span>${r.img ? `<img src="${r.img}" alt="" style="width:64px;height:45px;object-fit:cover;border-radius:6px">` : '💡'}</span><span class="fr-name"><b>${esc(r.card.name)}</b><small class="muted">${esc(r.card.newCat ? 'new set ' + r.card.newCat : r.card.cat)} · ${esc(r.card.tier)} · ${ctx.since(r.at)}</small></span><span class="fr-btns"><button class="btn sm" data-soc="sg-cancel" data-num="${r.num}" type="button">Cancel</button></span></div>`).join('')}</div></section>` : ''}`);
-      let data = null; const err = (m) => { $('#sgErr').textContent = m || ''; };
-      $('#sgCat').onchange = (e) => { $('#sgNew').hidden = e.target.value !== '__new'; };
-      $('#sgFile').onchange = async (e) => { const f = e.target.files[0]; data = null; $('#sgPrev').innerHTML = ''; err(''); if (!f) return; try { data = await readImg(f); $('#sgPrev').innerHTML = `<img src="${data}" alt="Preview" style="max-width:240px;border-radius:8px">`; } catch (er) { err(er.message); } };
+      let data = null;
+      const upd = () => {
+        const nc = $('#sgCat').value === '__new', cat = nc ? $('#sgNewCat').value.trim() : $('#sgCat').value, tier = $('#sgTier').value, base = G.CARDS[0];
+        const fake = Object.assign({}, base, { id: 'sugg', name: $('#sgName').value.trim() || 'Your card', cat: G.CATS[cat] ? cat : base.cat, tier: tier, ti: Math.max(0, G.TIERS.indexOf(tier)), fx: 0, rank: '?', img: data || null });
+        $('#sgCard').innerHTML = ctx.cardHTML(fake, { size: 190 }); $$('.card', $('#sgCard')).forEach(ctx.tilt);
+        $('#sgCap').textContent = (nc ? 'New set: ' + (cat || '…') : cat) + ' · ' + tier + (data ? '' : ' · no picture yet');
+      };
+      $('#sgForm').addEventListener('input', upd);
+      $('.sg-tiers').onclick = (e) => { const b = e.target.closest('.sg-tier'); if (!b) return; $('#sgTier').value = b.dataset.tier; $$('.sg-tier').forEach((x) => { const on = x === b; x.classList.toggle('on', on); x.setAttribute('aria-checked', on); }); upd(); };
+      upd();
+      const err = (m) => { $('#sgErr').textContent = m || ''; };
+      $('#sgCat').onchange = (e) => { $('#sgNew').hidden = e.target.value !== '__new'; upd(); };
+      $('#sgFile').onchange = async (e) => { const f = e.target.files[0]; data = null; $('#sgPrev').textContent = 'PNG, JPG, WebP or GIF. It is cropped to fit the card.'; err(''); upd(); if (!f) return; try { data = await readImg(f); $('#sgPrev').textContent = '✓ Picture added'; } catch (er) { err(er.message); } upd(); };
       $('#sgForm').onsubmit = act(async (e) => {
         e.preventDefault(); err(''); const name = clean($('#sgName').value, 40), isNew = $('#sgCat').value === '__new', nc = clean($('#sgNewCat').value, 12);
         if (!name) { err('Give the card a name'); return; }

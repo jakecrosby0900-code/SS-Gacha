@@ -110,3 +110,34 @@ Open tabs check `version.json` every couple of minutes and reload themselves whe
 - **Admin**: delete built-in cards (with a Restore list), reset one account or everyone to 0 (applied on each device's next sync, and the leaderboard shows zeros immediately), clear the Community rare pulls / Recent trades lists, drag or use arrows to order sets, review card image requests and **card suggestions** (new cards and sets). Request limits removed.
 - **Account menu** (top right) replaces the Profile, Friends and Settings tabs. **Messages dock** (round button bottom right) holds friend chats and **group chats** (a group is an issue; messages are comments). Notifications are a dropdown; read ones clear ~12s after being read.
 - **Faster multiplayer**: the game polls every ~5s using incremental `since=` reads (full read every 3 min), automatically slowing down if the shared GitHub token's rate limit runs low.
+
+## v31 notes
+- Removed the header mute button (sound is still in Settings).
+- Card backs have a real design: lattice, gold frame, corner studs, emblem and SPECIAL STRIKE wordmark.
+- Admin > Overview > Trade board: delete any board post.
+- Suggest a card page rebuilt in 3 steps with a live card preview and rarity chips.
+- Pack tear: the glowing opening now fills the whole top strip.
+
+## v32 notes
+- Tear opening trimmed to fit the pack top (a little smaller than v31).
+
+## v33 notes
+- Tear opening resized and lowered to sit in the strip.
+
+## v34 notes
+- Tear opening trimmed by a few pixels.
+
+## v35 notes
+- Tear opening spans the full pack width.
+
+## v36 notes
+- Tear opening measured against the strip: stays inside it on every side.
+
+## v37 notes
+- Tear opening bottom edge sits exactly on the pack body top.
+
+## v38 notes
+- Tear opening top edge lowered.
+
+## v39 notes
+- Closed the hairline gap between the tear opening and the pack body.
