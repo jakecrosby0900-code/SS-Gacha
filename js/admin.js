@@ -10,36 +10,25 @@
 // edit the repo's issues (everyone who has the site's shared token, i.e. anyone who reads the page source) could change the same data by hand.
 (function () {
   'use strict';
-  const ADMIN = { salt: '0MfMxikwfSmMt/rb6fO8cQ==', hash: 'TdZ10xvZRDIqN9XBFDu2Jj4vFkEsJ6tMGydDMj74o4M=', iter: 150000 };
+  const TOKEN_KEY = 'ss-gacha-admin-token'; // short-lived pass issued by the Worker after it checks the admin password
   const FLAG = 'ss-gacha-admin';
 
   window.SSGAdmin = function (ctx) {
     const G = ctx.G, $ = ctx.$, $$ = ctx.$$, esc = ctx.esc, net = ctx.net, toast = ctx.toast;
     const st = () => net.state;
     const view = { q: '', cat: '', tier: '', only: '', mode: 'list', busy: false, tab: 'home' };
-    const unlocked = () => { try { return sessionStorage.getItem(FLAG) === '1'; } catch (e) { return false; } };
-    const lock = () => { try { sessionStorage.removeItem(FLAG); } catch (e) { /* ignore */ } };
+    const unlocked = () => { try { const t = sessionStorage.getItem(TOKEN_KEY) || ''; return sessionStorage.getItem(FLAG) === '1' && +t.split('.')[0] > Date.now(); } catch (e) { return false; } };
+    const lock = () => { try { sessionStorage.removeItem(FLAG); sessionStorage.removeItem(TOKEN_KEY); } catch (e) { /* ignore */ } };
 
     // ---------- login (Settings) ----------
     function settingsHTML() {
       if (unlocked()) return `<section class="panel"><h2>Admin 🛠️</h2><p class="muted small">You are logged in as admin.</p><div class="row wrap"><a class="btn primary" href="#admin">Open admin page</a><button class="btn" id="adLock" type="button">Log out of admin</button></div></section>`;
-      return `<section class="panel"><h2>Admin 🔒</h2><p class="muted small">Admin login for managing the leaderboard and cards.</p>
-        <form id="adForm" novalidate><div class="row wrap"><label class="f">Admin username<input id="adUser" autocomplete="off" autocapitalize="none" spellcheck="false"></label>
-        <label class="f">Admin password<input id="adPass" type="password" autocomplete="off"></label></div>
-        <p class="auth-err" id="adErr" role="alert"></p><button class="btn" id="adGo" type="submit">Log in as admin</button></form></section>`;
+      return `<section class="panel"><h2>Admin 🔒</h2><p class="muted small">Admin login for managing the leaderboard and cards. It uses your Discord account, and only the admin's account is accepted.</p>
+        <p class="auth-err" id="adErr" role="alert"></p><button class="btn" id="adGo" type="button">Log in as admin with Discord</button></section>`;
     }
     function bindSettings() {
       const lk = $('#adLock'); if (lk) lk.onclick = () => { lock(); ctx.rerenderSettings(); toast('Admin logged out'); };
-      const f = $('#adForm'); if (!f) return;
-      f.onsubmit = async (e) => {
-        e.preventDefault(); const go = $('#adGo'), err = $('#adErr'); err.textContent = ''; go.disabled = true;
-        try {
-          const h = await window.SSG_CRYPTO.derive($('#adUser').value.trim() + '\n' + $('#adPass').value, ADMIN.salt, ADMIN.iter);
-          if (h !== ADMIN.hash) { err.textContent = 'Wrong admin username or password.'; go.disabled = false; return; }
-          try { sessionStorage.setItem(FLAG, '1'); } catch (ex) { /* ignore */ }
-          toast('Admin unlocked'); location.hash = '#admin';
-        } catch (ex) { err.textContent = ex.message || 'Could not check the login.'; go.disabled = false; }
-      };
+      const go = $('#adGo'); if (go) go.onclick = () => { go.disabled = true; go.textContent = 'Opening Discord...'; ctx.auth.startAdmin(); };
     }
 
     // ---------- helpers ----------

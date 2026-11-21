@@ -1030,7 +1030,7 @@
     } };
   net = window.SSGNet(ctx);
   auth = window.SSGAuth(Object.assign({}, ctx, { net }));
-  admin = window.SSGAdmin(Object.assign({}, ctx, { net }));
+  admin = window.SSGAdmin(Object.assign({}, ctx, { net, auth }));
   social = window.SSGSocial(Object.assign({}, ctx, { net, auth })); ctx.social = social;
   // If the saved game on this device does not belong to the signed-in account any more (for example site data was cleared), sign in again.
   // A different player's save on this device means signing out. A save that merely lost its account link (or has a different internal id) is re-attached to the
@@ -1043,7 +1043,7 @@
   net.loadCache(); // show admin-made card changes straight away; the online sync refreshes them
   // ---------- auto update ----------
   // version.json holds the newest version number. A tab running an older one reloads itself (after uploading its save), so old tabs do not overwrite newer data.
-  const VERSION = 48;
+  const VERSION = 50;
   async function checkVersion() {
     try {
       const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;

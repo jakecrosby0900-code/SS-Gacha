@@ -37,12 +37,14 @@
     async function gh(method, path, body, keep) {
       const c = conf(), headers = { Accept: 'application/vnd.github+json' };
       if (c.token) headers.Authorization = 'Bearer ' + c.token;
+      try { const at = sessionStorage.getItem('ss-gacha-admin-token'); if (at) headers['X-Admin-Token'] = at; } catch (e) { /* ignore */ }
       if (body) headers['Content-Type'] = 'application/json';
       const ac = new AbortController(), to = setTimeout(() => ac.abort(), 20000); let r;
       try { r = await fetch(c.api + path, { method, headers, body: body ? JSON.stringify(body) : undefined, cache: 'no-store', keepalive: !!keep, signal: ac.signal }); }
       catch (e) { throw new Error(e.name === 'AbortError' ? 'GitHub did not answer in time' : 'Network error: ' + e.message); } finally { clearTimeout(to); }
       if (!r.ok) {
-        const e = new Error(r.status === 401 ? 'Token rejected (401)' : r.status === 403 || r.status === 429 ? 'GitHub rate limit or permission problem (' + r.status + ')' : r.status === 404 ? 'Repo or issue not found (404). Check the repo name and token access.' : 'GitHub error ' + r.status);
+        let adminOnly = false; if (r.status === 403) { try { adminOnly = ((await r.clone().json()).message || '') === 'Admin only'; } catch (x) { /* ignore */ } }
+        const e = new Error(adminOnly ? 'Admin login missing or expired. Log in again in Settings.' : r.status === 401 ? 'Token rejected (401)' : r.status === 403 || r.status === 429 ? 'GitHub rate limit or permission problem (' + r.status + ')' : r.status === 404 ? 'Repo or issue not found (404). Check the repo name and token access.' : 'GitHub error ' + r.status);
         e.status = r.status; throw e;
       }
       const rem = r.headers && r.headers.get('x-ratelimit-remaining'); if (rem != null && rem !== '') net.rl = { rem: +rem, at: Date.now() };
