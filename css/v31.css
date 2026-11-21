@@ -46,7 +46,9 @@
 .card-back, .card-back::before, .card-back::after, .card-back svg { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
 .card-back svg { filter: none; }
 .face.back { z-index: 1; }
-.flipper.flipped .face.back, .flipper.flipped .face.back * { visibility: hidden; }
+/* The back is hidden only AFTER the card has turned past edge-on. The pack-opening flip (760ms, see flipSlot in app.js) passes 90 degrees after about
+   140ms, so the hide waits 0.15s. Hiding it on the first frame left an empty card for the first part of the turn, which made the flip look like a snap. */
+.flipper.flipped .face.back, .flipper.flipped .face.back * { visibility: hidden; transition: visibility 0s linear .15s; }
 
 /* Card page: the spinning card is a real slab: front and back faces plus four edge faces, a moving glare and a floor shadow. */
 .cv-3d { filter: none !important; transform-style: preserve-3d; }
@@ -63,3 +65,7 @@
 /* Cards, packs and the opening screen are not text: dragging over them never selects anything. */
 .card, .card *, .card-back, .card-back *, .pack, .pack *, .ppk, .ppk *, .stage-pack, .stage-pack *, .opening, .opening .slot, .opening .slot *, .cv-stage, .cv-stage *, .flipper, .flipper *, .best-row, .card-btn { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .card img, .pack img, .card-back img { -webkit-user-drag: none; user-drag: none; }
+
+/* Card page: a card you do not own is grey all over (front, back and rim). A filter on the preserve-3d slab itself would flatten it, so each face is filtered on its own;
+   the rim segments are already drawn in grey by cvSlab. */
+.cv-3d.cv-gray .cv-front .card, .cv-3d.cv-gray .cv-back .card-back { filter: grayscale(1) brightness(.85); }

@@ -158,3 +158,9 @@ Open tabs check `version.json` every couple of minutes and reload themselves whe
 
 ## v44 notes
 - Card rim corners use 16 segments with overlap, so no seam lines show on the bevels.
+
+## v45 notes
+- Card page 3D: the card's rim is now drawn in the card's rarity colour (Mythic red, Legendary gold, Sigma white, custom rarities use their own colour), with the same baked lighting as before.
+- Card page 3D: a card you do not own (for example in the Index) is grey all over: front, back and rim.
+- Pack opening: the flip is smooth again. The v40 rule that hides the card back now waits until the card has turned past edge-on (0.15s) instead of hiding it on the first frame, which had left an empty card for the first part of the turn.
+
