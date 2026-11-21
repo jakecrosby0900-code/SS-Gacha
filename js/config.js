@@ -7,8 +7,11 @@
 //            Anyone can read it from the page source, so only ever use a fine-grained token limited to this repo's Issues.
 // Players can also paste their own token in Settings instead, which overrides this one.
 window.SSG_NET = {
-  repo: '',
-  tokenEnc: ["WVo=","TW9iajdPMA==","SEw1RzRVRQ==","c3huNmEyaA==","anhzQjRqSA==","cUlWNjE2WA==","NTA3cEhyOA==","TzM3UFlMRw==","VTFGRllQeQ==","eE9VVG9fRQ==","MDd3TEpDNw==","M1ZCWkVRMA==","cGF0XzExQg==","Z2l0aHViXw=="]
+  repo: 'jakecrosby0900-code/SS-Gacha',
+  // All requests go to this Cloudflare Worker, which stores everything in a Cloudflare D1 database (no GitHub token involved).
+  api: 'https://ssg-api.optimusswine09.workers.dev',
+  // Placeholder only (the word "placeholder"). The site needs some value here to switch on online features; the Worker ignores it.
+  tokenEnc: ["bGRlcg==","cGxhY2Vobw=="]
 };
 
 // Discord sign-in (see README, "Sign in with Discord").
