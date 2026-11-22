@@ -224,7 +224,7 @@
     function setEditor(name) {
       const orig = name ? G.CAT_KEY[name] : null, builtin = !!orig && G.CAT_BASE.indexOf(orig) >= 0, cur = !name ? null : builtin ? { name: name, hue: G.CATS[name].hue, blurb: G.CATS[name].blurb } : st().cfg.sets.find((t) => t.name === name), isNew = !cur;
       const bg = ctx.modal(`<h2>${isNew ? 'Add a set' : 'Edit ' + esc(name)}</h2>
-        <div class="row wrap"><label class="f">Name<input id="stName" maxlength="12" value="${esc(cur ? cur.name : '')}" autocomplete="off"></label>
+        <div class="row wrap"><label class="f">Name<input id="stName" maxlength="20" value="${esc(cur ? cur.name : '')}" autocomplete="off"></label>
         <label class="f">Colour (hue)<input id="stHue" type="range" min="0" max="359" value="${cur ? cur.hue : 200}"></label></div>
         <label class="f">Description<input id="stBlurb" maxlength="90" value="${esc(cur ? cur.blurb : '')}" autocomplete="off"></label>
         <p class="muted small">${isNew ? 'After adding a set, use "Add card" and pick it in the Set list, or edit an existing card to move it here.' : 'Renaming a set updates its cards everywhere. Card IDs and saved collections are not affected.'}</p>

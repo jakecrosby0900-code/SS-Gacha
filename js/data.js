@@ -234,13 +234,13 @@ Ess Ess Gee Monster`;
       if (!isObj(edits)) return;
       list.forEach(function (n) { const e = edits[n], v = isObj(e) && nmOk(e.name, max); if (!v || v === n) return; const k = v.toLowerCase(); if (taken[k]) return; taken[k] = 1; map[n] = v; });
     };
-    renameOf(b.tierEdits, TIER0, 14, tierDisp); renameOf(b.setEdits, CAT_BASE, 12, catDisp);
+    renameOf(b.tierEdits, TIER0, 14, tierDisp); renameOf(b.setEdits, CAT_BASE, 20, catDisp);
     const normT = function (x) { return tierDisp[x] || x; }, normC = function (x) { return catDisp[x] || x; };
     const tierNames = TIER0.map(normT), catNames = CAT_BASE.map(normC);
     const nameFree = function (n, names, orig) { const k = n.toLowerCase(); return !names.some(function (t) { return t.toLowerCase() === k; }) && !orig.some(function (t) { return t.toLowerCase() === k; }) && !Object.keys(tierDisp).concat(Object.keys(catDisp)).some(function (t) { return t.toLowerCase() === k; }); };
     // Custom sets and rarities first, so cards can use them.
     if (Array.isArray(b.sets)) b.sets.slice(0, 40).forEach(function (x) {
-      const n = isObj(x) && nmOk(x.name, 12); if (!n || !nameFree(n, catNames, CAT_BASE)) return;
+      const n = isObj(x) && nmOk(x.name, 20); if (!n || !nameFree(n, catNames, CAT_BASE)) return;
       catNames.push(n); o.sets.push({ name: n, hue: Number.isFinite(+x.hue) ? ((Math.round(+x.hue) % 360) + 360) % 360 : 200, blurb: String(x.blurb == null ? '' : x.blurb).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 90) });
     });
     if (Array.isArray(b.tiers)) b.tiers.slice(0, 20).forEach(function (x) {

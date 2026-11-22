@@ -73,3 +73,9 @@
 /* Admin tag next to a name (profile page, player list). */
 .admin-tag { display: inline-block; vertical-align: middle; margin-left: 6px; padding: 2px 8px; border-radius: 999px; font: 700 .62em/1.4 'Chakra Petch', sans-serif; letter-spacing: .08em; text-transform: uppercase; color: #1b1300; background: linear-gradient(135deg, #ffd45e, #ff9d2e); box-shadow: 0 0 0 1px rgba(255, 190, 70, .5), 0 2px 10px rgba(255, 160, 40, .35); }
 .pl-top .admin-tag { font-size: .58rem; padding: 1px 6px; margin-left: 4px; }
+
+/* Pack opening with many packs: the stack used to fan out in a wide arc, so the front pack (the one you tear) ended up tilted and shifted far to the side the more packs
+   you held. Now the front pack always sits straight and square, and every other pack you hold (up to 15 are drawn) peeks out behind it, up and to the left. */
+.pile.tight .ppk { transform-origin: 50% 100%; transform: translate(calc(var(--d) * var(--st, 5px) * -1), calc(var(--d) * var(--st, 5px) * -.7)) rotate(calc(var(--d) * -.6deg)); }
+.pile.tight { --span: 0deg; }
+

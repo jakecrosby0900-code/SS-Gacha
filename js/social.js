@@ -408,7 +408,7 @@
               <label class="f"><span>Picture <span class="muted small">(optional)</span></span><span class="sg-drop"><input id="sgFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif"><span id="sgPrev" class="muted small">PNG, JPG, WebP or GIF. It is cropped to fit the card.</span></span></label></section>
             <section class="panel sg-step"><h2><i>2</i> Where it belongs</h2>
               <label class="f">Set<select id="sgCat">${sets.map((k) => `<option>${esc(k)}</option>`).join('')}<option value="__new">➕ A new set…</option></select></label>
-              <div id="sgNew" hidden class="sg-newset"><label class="f">New set name<input id="sgNewCat" maxlength="12" placeholder="Up to 12 letters"></label><label class="f"><span>What is the set about? <span class="muted small">(optional)</span></span><input id="sgBlurb" maxlength="90"></label></div>
+              <div id="sgNew" hidden class="sg-newset"><label class="f">New set name<input id="sgNewCat" maxlength="20" placeholder="Up to 20 letters"></label><label class="f"><span>What is the set about? <span class="muted small">(optional)</span></span><input id="sgBlurb" maxlength="90"></label></div>
               <div class="f"><span>Rarity you think it should be</span><input type="hidden" id="sgTier" value="${esc(tiers[0])}"><div class="sg-tiers" role="radiogroup" aria-label="Rarity">${tiers.map((t, i) => `<button type="button" class="sg-tier${i ? '' : ' on'}" role="radio" aria-checked="${i ? 'false' : 'true'}" data-tier="${esc(t)}" style="--tc:var(--t-${tkey(t)}, var(--accent, #8b5cf6))">${esc(t)}</button>`).join('')}</div></div></section>
             <section class="panel sg-step"><h2><i>3</i> Anything else?</h2>
               <label class="f"><span>Note for the admin <span class="muted small">(optional)</span></span><input id="sgNote" maxlength="160" placeholder="Where it is from, why it fits…"></label>
@@ -431,7 +431,7 @@
       $('#sgCat').onchange = (e) => { $('#sgNew').hidden = e.target.value !== '__new'; upd(); };
       $('#sgFile').onchange = async (e) => { const f = e.target.files[0]; data = null; $('#sgPrev').textContent = 'PNG, JPG, WebP or GIF. It is cropped to fit the card.'; err(''); upd(); if (!f) return; try { data = await readImg(f); $('#sgPrev').textContent = '✓ Picture added'; } catch (er) { err(er.message); } upd(); };
       $('#sgForm').onsubmit = act(async (e) => {
-        e.preventDefault(); err(''); const name = clean($('#sgName').value, 40), isNew = $('#sgCat').value === '__new', nc = clean($('#sgNewCat').value, 12);
+        e.preventDefault(); err(''); const name = clean($('#sgName').value, 40), isNew = $('#sgCat').value === '__new', nc = clean($('#sgNewCat').value, 20);
         if (!name) { err('Give the card a name'); return; }
         if (isNew && (!nc || !NAME_OK.test(nc))) { err('Name the new set using letters, numbers and spaces'); return; }
         if (isNew && Object.keys(G.CATS).some((k) => k.toLowerCase() === nc.toLowerCase())) { err('That set already exists. Pick it from the list instead'); return; }

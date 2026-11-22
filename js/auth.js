@@ -137,7 +137,7 @@
           const cloud = net.state.dir.find((p) => p.id === a.pid);
           let next;
           if (cloud) {
-            const cards = {}; Object.keys(cloud.cards).forEach((id) => { const c = cloud.cards[id]; cards[id] = { n: c.n, h: c.h, f: c.f, t: c.t, l: c.l }; });
+            const cards = {}; Object.keys(cloud.cards).forEach((id) => { const c = cloud.cards[id]; cards[id] = { n: c.n, h: c.h, f: c.f, t: c.t, l: c.l, p: c.p }; });
             next = Object.assign(ctx.fresh(), cloud.raw || {}, { stats: Object.assign({ opened: cloud.opened, pulls: cloud.pulls }, (cloud.raw || {}).stats), cards: cards, profile: { id: cloud.id, name: cloud.name, hue: cloud.hue, pfp: cloud.pfp, banner: cloud.banner, joined: cloud.joined }, settings: Object.assign({}, S.settings) });
           } else { next = ctx.fresh(); next.profile.id = a.pid; next.profile.name = a.u; }
           next.account = k; next.mod = next.syncMod = (cloud && cloud.mod) || 0; ctx.adopt(next);

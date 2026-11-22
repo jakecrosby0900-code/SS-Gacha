@@ -63,7 +63,7 @@
     function cleanPlayer(b, num) {
       const id = idOk(b.id); if (!id) return null;
       const cards = {};
-      if (b.cards && typeof b.cards === 'object') Object.keys(b.cards).forEach((cid) => { const a = b.cards[cid]; if (BYID[cid] && Array.isArray(a) && +a[0] > 0) { const n = Math.min(9999, +a[0] | 0); cards[cid] = { n: n, h: Math.min(n, Math.max(0, +a[1] | 0)), f: a[2] ? 1 : 0, t: +a[3] || 0, l: +a[4] || 0 }; } });
+      if (b.cards && typeof b.cards === 'object') Object.keys(b.cards).forEach((cid) => { const a = b.cards[cid]; if (BYID[cid] && Array.isArray(a) && +a[0] > 0) { const n = Math.min(9999, +a[0] | 0); cards[cid] = { n: n, h: Math.min(n, Math.max(0, +a[1] | 0)), f: a[2] ? 1 : 0, t: +a[3] || 0, l: +a[4] || 0, p: +a[5] || 0 }; } });
       const wish = Array.isArray(b.wish) ? b.wish.filter((x) => typeof x === 'string' && BYID[x]).slice(0, 300) : [];
       const wk = b.wk && +b.wk.t === weekStart(Date.now()) && +b.wk.v === 2 ? Math.max(0, +b.wk.s || 0) : null; // v2 = baseline taken with the 10-point scoring
       const pl = derive({ id: id, name: nm(b.name), hue: Number.isFinite(+b.hue) ? ((+b.hue % 360) + 360) % 360 : 28, pfp: okImg(b.pfp), banner: okImg(b.banner), joined: +b.joined || 0, seen: +b.seen || 0,
@@ -136,7 +136,7 @@
         }
         else if (b.t === 'board' && idOk(b.pid)) { const ok = (a) => (Array.isArray(a) ? a.filter((x) => typeof x === 'string' && BYID[x.replace(/\|[01]$/, '')]).map((x) => (/\|0$/.test(x) ? x.slice(0, -2) : x)).slice(0, BOARD_CARDS) : []), want = ok(b.want), offer = ok(b.offer); if ((want.length || offer.length) && Date.now() - (+b.at || 0) < BOARD_MS) board.push({ num: num, id: String(b.id || num).slice(0, 24), pid: b.pid, name: nm(b.name), want: want, offer: offer, note: String(b.note || '').replace(/[\r\n\t]+/g, ' ').slice(0, 100), at: +b.at || 0, ccount: +x.i.comments || 0 }); }
         else if (b.t === 'imgreq' && idOk(b.id) && idOk(b.pid) && typeof b.card === 'string') { imgreqs.push({ id: b.id, num: num, card: b.card.slice(0, 120), pid: b.pid, name: nm(b.name), img: okImg(b.img), note: String(b.note || '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 120), at: +b.at || 0, status: ['pending', 'approved', 'rejected'].indexOf(b.status) >= 0 ? b.status : 'pending' }); }
-        else if (b.t === 'sugg' && idOk(b.id) && idOk(b.pid) && b.card && typeof b.card === 'object') { const k = b.card; suggs.push({ id: b.id, num: num, pid: b.pid, name: nm(b.name), card: { name: String(k.name || '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 40), cat: String(k.cat || '').slice(0, 12), newCat: String(k.newCat || '').replace(/\s+/g, ' ').trim().slice(0, 12), blurb: String(k.blurb || '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 90), tier: String(k.tier || '').slice(0, 14) }, img: okImg(b.img), note: String(b.note || '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 160), at: +b.at || 0, status: ['pending', 'approved', 'rejected'].indexOf(b.status) >= 0 ? b.status : 'pending' }); }
+        else if (b.t === 'sugg' && idOk(b.id) && idOk(b.pid) && b.card && typeof b.card === 'object') { const k = b.card; suggs.push({ id: b.id, num: num, pid: b.pid, name: nm(b.name), card: { name: String(k.name || '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 40), cat: String(k.cat || '').slice(0, 12), newCat: String(k.newCat || '').replace(/\s+/g, ' ').trim().slice(0, 20), blurb: String(k.blurb || '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 90), tier: String(k.tier || '').slice(0, 14) }, img: okImg(b.img), note: String(b.note || '').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 160), at: +b.at || 0, status: ['pending', 'approved', 'rejected'].indexOf(b.status) >= 0 ? b.status : 'pending' }); }
         else if (b.t === 'group' && idOk(b.id) && idOk(b.owner) && Array.isArray(b.members)) { const mem = b.members.slice(0, 20).filter((m) => m && idOk(m.id)).map((m) => ({ id: m.id, name: nm(m.name) })); if (mem.length) groups.push({ gid: b.id, num: num, name: String(b.name || 'Group').replace(/[\r\n\t]+/g, ' ').trim().slice(0, 30) || 'Group', owner: b.owner, members: mem, ccount: +x.i.comments || 0, at: +b.at || 0 }); }
         else if (b.t === 'friend' && idOk(b.id) && b.from && b.to && idOk(b.from.id) && idOk(b.to.id)) { friends.push({ fid: b.id, num: num, from: { id: b.from.id, name: nm(b.from.name) }, to: { id: b.to.id, name: nm(b.to.name) }, status: ['pending', 'accepted', 'declined'].indexOf(b.status) >= 0 ? b.status : 'pending', at: +b.at || 0, ccount: +x.i.comments || 0 }); }
         else if (b.t === 'redeem' && typeof b.code === 'string' && idOk(b.pid)) { const k = b.pid + '|' + b.code; if (!seenRd[k]) { seenRd[k] = 1; redeems.push({ code: b.code.toUpperCase().slice(0, 24), pid: b.pid, name: nm(b.name), at: +b.at || 0 }); } }
@@ -213,7 +213,7 @@
     // ---------- publishing my account ----------
     function build() {
       const s = S(), p = s.profile, cards = {};
-      Object.keys(s.cards).forEach((id) => { const e = s.cards[id]; if (BYID[id] && e.n > 0) cards[id] = [e.n, e.h || 0, e.f ? 1 : 0, e.t || 0, e.l || 0]; });
+      Object.keys(s.cards).forEach((id) => { const e = s.cards[id]; if (BYID[id] && e.n > 0) cards[id] = [e.n, e.h || 0, e.f ? 1 : 0, e.t || 0, e.l || 0, e.p || 0]; });
       const ws = weekStart(Date.now()); if (!s.wk || s.wk.t < ws || s.wk.v !== 2) s.wk = { t: ws, s: G.scoreOf(s.cards), v: 2 };
       return { t: 'player', v: 1, ra: s.resetAt || 0, id: p.id, name: p.name, bio: p.bio || '', hue: p.hue, pfp: p.pfp, banner: p.banner, joined: p.joined, seen: Date.now(), opened: s.stats.opened, pulls: s.stats.pulls, cards: cards, wish: Object.keys(s.wish || {}).filter((x) => BYID[x]).slice(0, 300), wk: s.wk, show: s.showcase || [],
         save: { wish: s.wish || {}, wk: s.wk, showcase: s.showcase || [], mod: s.mod || 0, granted: s.granted, packs: s.packs, bonus: s.bonus || 0, last: s.last, sinceRare: s.sinceRare, started: s.started, stats: s.stats, codes: s.codes, net: s.net, social: s.social } };
@@ -450,9 +450,9 @@
       shown().forEach((p) => {
         const mine = p.id === me; if (mine) sawMe = true; if (!mine && !p.full) return;
         const cards = mine ? S().cards : p.cards;
-        Object.keys(cards).forEach((id) => { const c = BYID[id], e = cards[id]; if (c && e && e.n > 0 && c.fx >= 4 && e.l) out.push({ id: p.id, name: mine ? S().profile.name : p.name, card: c, at: e.l, holo: e.h > 0 }); });
+        Object.keys(cards).forEach((id) => { const c = BYID[id], e = cards[id]; if (c && e && e.n > 0 && c.fx >= 4 && e.p) out.push({ id: p.id, name: mine ? S().profile.name : p.name, card: c, at: e.p, holo: e.h > 0 }); });
       });
-      if (!sawMe && ctx.loggedIn()) Object.keys(S().cards).forEach((id) => { const c = BYID[id], e = S().cards[id]; if (c && e && e.n > 0 && c.fx >= 4 && e.l) out.push({ id: me, name: S().profile.name, card: c, at: e.l, holo: e.h > 0 }); });
+      if (!sawMe && ctx.loggedIn()) Object.keys(S().cards).forEach((id) => { const c = BYID[id], e = S().cards[id]; if (c && e && e.n > 0 && c.fx >= 4 && e.p) out.push({ id: me, name: S().profile.name, card: c, at: e.p, holo: e.h > 0 }); });
       const fc = G.feedClear().pulls; return out.filter((x) => x.at > fc).sort((a, b) => b.at - a.at).slice(0, limit || 12);
     }
     const TABS = [['score', 'Most points'], ['unique', 'Most unique cards'], ['opened', 'Most packs opened'], ['week', 'This week']];
@@ -746,7 +746,7 @@
           await refresh(); const p = net.dir.find((x) => x.id === id);
           if (!p || !p.raw) { toast('No published save found for that ID', true); return; }
           if (!window.confirm(`Replace this device's save with the one published by ${p.name}?`)) return;
-          const cards = {}; Object.keys(p.cards).forEach((k) => { cards[k] = { n: p.cards[k].n, h: p.cards[k].h, f: p.cards[k].f, t: p.cards[k].t, l: p.cards[k].l }; });
+          const cards = {}; Object.keys(p.cards).forEach((k) => { cards[k] = { n: p.cards[k].n, h: p.cards[k].h, f: p.cards[k].f, t: p.cards[k].t, l: p.cards[k].l, p: p.cards[k].p }; });
           ctx.restore(Object.assign({}, p.raw, { cards: cards, profile: { id: p.id, name: p.name, bio: p.bio || '', hue: p.hue, pfp: p.pfp, banner: p.banner, joined: p.joined }, settings: S().settings }));
         } catch (e) { toast('Could not restore: ' + e.message, true); }
       };

@@ -104,8 +104,8 @@
       if (o.eaten) return;
       const e = S.cards[o.card.id];
       o.isNew = !e ? 'card' : (o.holo && !e.h ? 'holo' : '');
-      if (!e) S.cards[o.card.id] = { n: 1, h: o.holo ? 1 : 0, t: Date.now(), l: Date.now(), f: 0 };
-      else { e.n++; e.l = Date.now(); if (o.holo) e.h++; }
+      if (!e) S.cards[o.card.id] = { n: 1, h: o.holo ? 1 : 0, t: Date.now(), l: Date.now(), p: Date.now(), f: 0 }; // p = last time it came out of a PACK (trades and gifts only set l); the Community rare pulls feed reads p
+      else { e.n++; e.l = Date.now(); e.p = Date.now(); if (o.holo) e.h++; }
     });
     S.stats.opened++; S.stats.pulls += out.filter((o) => !o.eaten).length;
     return out;
@@ -631,7 +631,7 @@
     const c = BYID[id], e = cards[id], own = !!(e && e.n > 0), mine = !who, copies = [];
     if (own) { for (let i = 0; i < e.h; i++) copies.push(1); for (let i = 0; i < e.n - e.h; i++) copies.push(0); } // skibidi copies count first (see scoring)
     const n = copies.length, shown = copies.slice(0, 24), size = !own ? 176 : n <= 2 ? 176 : n <= 4 ? 150 : n <= 8 ? 120 : 96, mineE = S.cards[id], iOwn = !!(mineE && mineE.n > 0);
-    const tiles = own ? shown.map((h, k) => `<button type="button" class="pop-copy" data-act="zoom" data-id="${id}" data-h="${h}" data-k="${k + 1}" aria-label="Look closer at copy ${k + 1}">${cardHTML(c, { holo: !!h, size })}<small class="pop-val">${k ? `copy ${k + 1} · ` : ''}+${fmtPts(G.copyValue(c, k + 1, h))} pt${G.copyValue(c, k + 1, h) === 1 ? '' : 's'}</small></button>`).join('') : `<button type="button" class="pop-copy" data-act="zoom" data-id="${id}" data-h="0" data-k="0" data-locked="1" aria-label="Look closer">${cardHTML(c, { locked: !!c.monster, ghost: !c.monster, size })}</button>`;
+    const tiles = own ? shown.map((h, k) => `<button type="button" class="pop-copy" data-act="card-open" data-id="${id}" data-v="${h}" data-k="${k + 1}" aria-label="Open details for copy ${k + 1}">${cardHTML(c, { holo: !!h, size })}<small class="pop-val">${k ? `copy ${k + 1} · ` : ''}+${fmtPts(G.copyValue(c, k + 1, h))} pt${G.copyValue(c, k + 1, h) === 1 ? '' : 's'}</small></button>`).join('') : `<button type="button" class="pop-copy" data-act="zoom" data-id="${id}" data-h="0" data-k="0" data-locked="1" aria-label="Look closer">${cardHTML(c, { locked: !!c.monster, ghost: !c.monster, size })}</button>`;
     const action = mine ? (own ? `<button class="btn sm" data-act="fav" data-id="${id}">${e.f ? '★ Unfavorite' : '☆ Favorite'}</button>` : `<button class="btn sm ${S.wish[id] ? 'primary' : ''}" data-act="wish" data-id="${id}">${S.wish[id] ? '🔖 On your wishlist' : '🔖 Add to wishlist'}</button>`)
       : (!iOwn ? `<button class="btn sm ${S.wish[id] ? 'primary' : ''}" data-act="wish" data-id="${id}">${S.wish[id] ? '🔖 On your wishlist' : '🔖 Add to wishlist'}</button>` : '');
     return `<div class="pop-head"><div class="pop-title"><b>#${c.rank} ${own || !c.monster ? esc(c.name) : '???'}</b><span class="muted small">${own ? `${n} cop${n === 1 ? 'y' : 'ies'}${e.h ? ` · ${e.h} skibidi` : ''}${who ? ` · ${esc(who)}` : ''}` : who ? `${esc(who)} has none` : 'Not found yet'}</span></div><button type="button" class="pop-x" data-act="close-pop" aria-label="Close">✕</button></div>
@@ -666,12 +666,12 @@
   const cv = { id: '', src: '', v: 0, rx: 0, ry: 0 };
   const cvCards = () => { if (cv.src) { const o = net.state.dir.find((p) => p.id === cv.src); if (o) return o.cards; } return S.cards; };
   const odds = (p) => (p <= 0 ? 'Not in packs' : `${(p * 100).toFixed(p < 0.0001 ? 5 : p < 0.01 ? 4 : 2)}% (1 in ${Math.round(1 / p).toLocaleString('en-GB')})`);
-  function cardPop(id, anchor, src) { cardView(id, src); }
-  function cardView(id, src) {
+  function cardPop(id, anchor, src, v) { cardView(id, src, v); }
+  function cardView(id, src, v) {
     if (!BYID[id]) return; popClose();
     const old = $('.modal-bg .cardview'); if (old) closeModal(old.closest('.modal-bg'));
     const other = src ? net.state.dir.find((p) => p.id === src) : null; cv.id = id; cv.src = other && other.id !== S.profile.id ? other.id : ''; cv.rx = cv.ry = 0;
-    const e = cvCards()[id]; cv.v = e && e.h > 0 ? 1 : 0;
+    const e = cvCards()[id]; cv.v = e && e.h > 0 ? 1 : 0; if (v === 0 || v === 1) cv.v = v; // cvDraw corrects it if you do not own that version
     modal('<div class="cv"></div>', 'cardview'); cvDraw();
   }
   // The rim of the spinning card: its outline (straight sides plus the four rounded corners, each cut into short segments) extruded to the card's thickness, with a baked light from the top-left.
@@ -725,6 +725,7 @@
     if (keep) { /* same card: nothing else to do */ }
     cvApply(); const st = $('.cardview .cv-3d'); if (st) st.style.transition = '';
   }
+  function popRefresh() { if (popup.el && popup.key && popup.key.indexOf('card:') === 0) popSet(cardPopHTML(popup.key.slice(5), S.cards)); }
   function cardPopRefresh() { if ($('.cardview .cv')) cvDraw(); }
   // dragging the card spins it; Flip turns it over; Reset brings it back
   (function () {
@@ -794,7 +795,8 @@
       stage.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); finishRip(); } });
       stage.addEventListener('pointerdown', (ev) => {
         if (done) return;
-        const r = pack0.getBoundingClientRect(), up = 8 * pileCount(n), nearTop = ev.clientY < r.top + r.height * 0.38 && ev.clientY > r.top - 40 - up && ev.clientX > r.left - 30 - up && ev.clientX < r.right + 30;
+        const r = pack0.getBoundingClientRect(), pk = ev.target.closest && ev.target.closest('.ppk'), onBack = !!pk && !pk.matches(':last-child'), // a tear only starts on the TOP edge of the FRONT pack: not on the packs peeking out behind it, not beside it
+          nearTop = !onBack && ev.clientY >= r.top - 4 && ev.clientY < r.top + r.height * 0.3 && ev.clientX >= r.left - 4 && ev.clientX <= r.right + 4;
         if (nearTop) { drag = { x: ev.clientX, id: ev.pointerId, w: r.width }; try { stage.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ } stage.classList.add('ripping'); }
         else { pack0.classList.remove('tap'); void pack0.offsetWidth; pack0.classList.add('tap'); SFX.click(); fx.burst(tapColors, 10, false, ev.clientX, ev.clientY); const hint = $('.tap-hint', ov); if (hint) hint.classList.add('nudge'); }
       });
@@ -912,15 +914,16 @@
       case 'toggle-sound': S.settings.sound = !S.settings.sound; applyAudio(); save(); renderHeader(); if (S.settings.sound) SFX.click(); break;
       case 'open-1': SFX.click(); openPacks(1); break;
       case 'open-all': SFX.click(); openPacks(avail()); break;
-      case 'card': SFX.click(); cardPop(id, t, t.dataset.src); break;
+      case 'card': { SFX.click(); const mine = !t.dataset.src && S.cards[id]; if (mine && mine.n > 1 && !t.closest('.modal-bg')) popOpen(t, cardPopHTML(id, S.cards), { key: 'card:' + id }); else cardPop(id, t, t.dataset.src); break; } // your own card with copies to spare: a popover with every copy first; click a copy for its details
+      case 'card-open': { SFX.click(); popClose(); cardPop(id, t, '', t.dataset.v == null ? undefined : +t.dataset.v); break; }
       case 'close-pop': popClose(); break;
       case 'zoom': zoomCard(t); break;
       case 'redeem': redeemModal(); break;
       case 'edit-profile': editProfile(); break;
       case 'nav-more': { const n = t.closest('nav'); const o = n.classList.toggle('open'); t.setAttribute('aria-expanded', String(o)); break; }
-      case 'wish': { if (S.wish[id]) delete S.wish[id]; else S.wish[id] = 1; save(); route(); cardPopRefresh(); toast(S.wish[id] ? 'Added to your wishlist. Others can see it when they trade with you.' : 'Removed from your wishlist'); break; }
+      case 'wish': { if (S.wish[id]) delete S.wish[id]; else S.wish[id] = 1; save(); route(); cardPopRefresh(); popRefresh(); toast(S.wish[id] ? 'Added to your wishlist. Others can see it when they trade with you.' : 'Removed from your wishlist'); break; }
       case 'ann-x': { try { const d = JSON.parse(localStorage.getItem('ss-gacha-ann') || '[]'); d.push(id); localStorage.setItem('ss-gacha-ann', JSON.stringify(d.slice(-30))); } catch (e) { /* ignore */ } const b = t.closest('.ann'); if (b) b.remove(); break; }
-      case 'fav': { const x = S.cards[id]; if (x) { x.f = x.f ? 0 : 1; save(); route(); cardPopRefresh(); } break; }
+      case 'fav': { const x = S.cards[id]; if (x) { x.f = x.f ? 0 : 1; save(); route(); cardPopRefresh(); popRefresh(); } break; }
     }
   });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (popup.el) { popClose(); return; } const m = $$('.modal-bg').pop(); if (m && !$('.welcome', m)) closeModal(m); } });
@@ -993,7 +996,7 @@
     const quiet = soft === true, m = main(), ae = document.activeElement;
     if (quiet && ae && m && m.contains(ae) && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) return;
     const y = window.scrollY, fid = quiet && ae && ae.id ? ae.id : '';
-    const h = (location.hash.slice(1) || 'home'), fn = h.indexOf('user-') === 0 ? () => net.pageUser(h.slice(5)) : h.indexOf('chat-') === 0 ? () => social.pageChat(h.slice(5)) : (PAGES[h] || pageHome);
+    const h = (location.hash.slice(1) || 'home'), fn = h.indexOf('user-') === 0 ? () => net.pageUser(h.slice(5)) : h.indexOf('chat-') === 0 ? () => social.pageChat(h.slice(5)) :  (PAGES[h] || pageHome);
     if (m) m.classList.toggle('soft', quiet);
     renderHeader(); fn(); updateHud();
     if (net.state.cfg) { const a = annHTML(); if (a) main().insertAdjacentHTML('afterbegin', a); }
@@ -1011,14 +1014,14 @@
     fresh, adopt: (j) => { S = normalize(j); save(true); }, rerenderSettings: () => pageSettings(),
     // Bring the account's newer cloud save in. keepLocal = this device has changes the cloud has not seen, so combine instead of replace (never loses a card).
     mergeCloud: (p, keepLocal) => {
-      const cc = {}; Object.keys(p.cards).forEach((id) => { const c = p.cards[id]; cc[id] = { n: c.n, h: c.h, f: c.f, t: c.t, l: c.l }; });
+      const cc = {}; Object.keys(p.cards).forEach((id) => { const c = p.cards[id]; cc[id] = { n: c.n, h: c.h, f: c.f, t: c.t, l: c.l, p: c.p }; });
       const raw = p.raw || {}, prof = { id: p.id, name: p.name, bio: p.bio || '', hue: p.hue, pfp: p.pfp, banner: p.banner, joined: p.joined };
       let next;
       if (!keepLocal) { next = Object.assign(fresh(), raw, { cards: cc, profile: prof, settings: Object.assign({}, S.settings), account: S.account }); next.mod = next.syncMod = p.mod; }
       else {
         next = JSON.parse(JSON.stringify(S));
         Object.keys(cc).forEach((id) => { const a = next.cards[id], b = cc[id];
-          if (!a) next.cards[id] = b; else { a.n = Math.max(a.n, b.n); a.h = Math.min(a.n, Math.max(a.h || 0, b.h || 0)); a.f = a.f || b.f ? 1 : 0; a.t = Math.min(a.t || b.t, b.t || a.t); a.l = Math.max(a.l || 0, b.l || 0); } });
+          if (!a) next.cards[id] = b; else { a.n = Math.max(a.n, b.n); a.h = Math.min(a.n, Math.max(a.h || 0, b.h || 0)); a.f = a.f || b.f ? 1 : 0; a.t = Math.min(a.t || b.t, b.t || a.t); a.l = Math.max(a.l || 0, b.l || 0); a.p = Math.max(a.p || 0, b.p || 0); } });
         const cloudNewer = p.mod > (S.mod || 0);
         next.codes = Array.from(new Set((next.codes || []).concat(raw.codes || []))); next.wish = Object.assign({}, raw.wish || {}, next.wish || {}); next.granted = Object.assign({}, S.granted || {});
         // Take over the cloud's applied-gift list, except for removals this device has not applied yet (it must still apply them, or old cards would come back).
@@ -1048,7 +1051,7 @@
   net.loadCache(); // show admin-made card changes straight away; the online sync refreshes them
   // ---------- auto update ----------
   // version.json holds the newest version number. A tab running an older one reloads itself (after uploading its save), so old tabs do not overwrite newer data.
-  const VERSION = 51;
+  const VERSION = 53;
   async function checkVersion() {
     try {
       const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;
