@@ -21,8 +21,13 @@
     const lock = () => { try { sessionStorage.removeItem(FLAG); sessionStorage.removeItem(TOKEN_KEY); } catch (e) { /* ignore */ } };
 
     // ---------- login (Settings) ----------
+    // If this admin's Discord ID is not in SSG_ADMINS yet, show it so it can be pasted into js/config.js (that is what shows the Admin tag).
+    function adminIdTip() {
+      const s = ctx.auth && ctx.auth.session(); if (!s || ctx.isAdminAcct(s.k)) return '';
+      return ` <br>To show an <b>Admin</b> tag on your profile, add your Discord ID <code>${esc(s.k.slice(1))}</code> to <code>SSG_ADMINS</code> in js/config.js.`;
+    }
     function settingsHTML() {
-      if (unlocked()) return `<section class="panel"><h2>Admin 🛠️</h2><p class="muted small">You are logged in as admin.</p><div class="row wrap"><a class="btn primary" href="#admin">Open admin page</a><button class="btn" id="adLock" type="button">Log out of admin</button></div></section>`;
+      if (unlocked()) return `<section class="panel"><h2>Admin 🛠️</h2><p class="muted small">You are logged in as admin. This unlocks by itself whenever you sign in with the admin's Discord account.${adminIdTip()}</p><div class="row wrap"><a class="btn primary" href="#admin">Open admin page</a><button class="btn" id="adLock" type="button">Log out of admin</button></div></section>`;
       return `<section class="panel"><h2>Admin 🔒</h2><p class="muted small">Admin login for managing the leaderboard and cards. It uses your Discord account, and only the admin's account is accepted.</p>
         <p class="auth-err" id="adErr" role="alert"></p><button class="btn" id="adGo" type="button">Log in as admin with Discord</button></section>`;
     }
@@ -539,7 +544,7 @@
         .then(() => { view.seeding = false; if (location.hash === '#admin') page(); }).catch(() => { view.seeding = false; });
     }
     function page() {
-      if (!unlocked()) { toast('Log in as admin in Settings first', true); location.hash = '#options'; return; }
+      if (!unlocked()) { if (ctx.auth.autoAdmin()) return; toast('Log in as admin in Settings first', true); location.hash = '#options'; return; } // a returning admin is sent through Discord once to get a fresh pass
       if (!net.enabled()) { $('#main').innerHTML = '<h1>Admin</h1><div class="panel"><p class="muted">The online connection is not set up, so there is nothing to manage.</p></div>'; return; }
       const dir = st().dir, blocked = st().cfg.blocked, accounts = st().accounts.slice().sort((a, b) => a.u.localeCompare(b.u)), cfg = st().cfg, now = Date.now();
       const byPid = {}; dir.forEach((p) => { byPid[p.id] = p; });

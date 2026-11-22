@@ -69,3 +69,7 @@
 /* Card page: a card you do not own is grey all over (front, back and rim). A filter on the preserve-3d slab itself would flatten it, so each face is filtered on its own;
    the rim segments are already drawn in grey by cvSlab. */
 .cv-3d.cv-gray .cv-front .card, .cv-3d.cv-gray .cv-back .card-back { filter: grayscale(1) brightness(.85); }
+
+/* Admin tag next to a name (profile page, player list). */
+.admin-tag { display: inline-block; vertical-align: middle; margin-left: 6px; padding: 2px 8px; border-radius: 999px; font: 700 .62em/1.4 'Chakra Petch', sans-serif; letter-spacing: .08em; text-transform: uppercase; color: #1b1300; background: linear-gradient(135deg, #ffd45e, #ff9d2e); box-shadow: 0 0 0 1px rgba(255, 190, 70, .5), 0 2px 10px rgba(255, 160, 40, .35); }
+.pl-top .admin-tag { font-size: .58rem; padding: 1px 6px; margin-left: 4px; }

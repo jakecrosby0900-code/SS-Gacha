@@ -247,7 +247,7 @@
     box.innerHTML = `<div class="pp-user">${avatarHTML(44)}<span><b>${esc(S.profile.name)}</b><small class="muted">${S.packs} / ${D().cap} packs</small></span><a class="pp-gear" href="#options" title="Settings" aria-label="Settings">⚙️</a></div>
       <a class="pp-item" role="menuitem" href="#profile">Profile</a>
       <a class="pp-item" role="menuitem" href="#friends">Friends<span class="nbadge" data-friendbadge hidden></span></a>
-      ${admin && admin.unlocked() ? '<a class="pp-item" role="menuitem" href="#admin">Admin</a>' : ''}
+      ${admin && (admin.unlocked() || auth.adminHint()) ? '<a class="pp-item" role="menuitem" href="#admin">Admin</a>' : ''}
       <div class="pp-sep"></div><button type="button" class="pp-item pp-out" role="menuitem" data-pp="logout">Log out</button>`;
     document.body.append(box); const b = $('[data-prof]'); if (b) b.setAttribute('aria-expanded', 'true'); profPlace(); if (net) net.paint();
   }
@@ -380,6 +380,10 @@
   const joinedTxt = (t) => new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
   // Used for your own profile and for other players' profiles. ov overrides the computed numbers (for players we only have a summary of).
   // ov.after = html placed right under the header card, ov.tail = html at the very end, ov.src = player id when the cards are someone else's.
+  // Admin tag: label only (the Worker decides who is really an admin). IDs come from SSG_ADMINS in js/config.js.
+  const ADMIN_TAG = '<span class="admin-tag" title="Site admin">Admin</span>';
+  const isAdminAcct = (k) => /^d\d{15,19}$/.test(k || '') && (window.SSG_ADMINS || []).map(String).indexOf(String(k).slice(1)) >= 0;
+  const isAdminPid = (pid) => { const a = net && net.state.accounts.find((x) => x.pid === pid); return !!a && isAdminAcct(a.k); };
   function profileHTML(p, cards, stats, actions, full, ov) {
     ov = ov || {};
     const ents = Object.entries(cards).filter(([id, e]) => BYID[id] && e.n > 0), src = ov.src ? ` data-src="${esc(ov.src)}"` : '';
@@ -395,7 +399,7 @@
       : `<section><h2>Favorite cards</h2>${row(favs, ov.mine ? 'No favorites yet. Click a card and press Favorite.' : 'No favorites yet.')}</section><section><h2>Recently obtained</h2>${row(recent, 'No cards yet.')}</section>${full && !ov.mine ? `<section><h2>Collection <span class="muted small">${ents.length} cards</span></h2>${row(ents.slice().sort(byRar), 'Nothing yet.')}</section>` : ''}`;
     return `<section class="pf2"><div class="pf2-banner" style="${bannerCSS(p)}"><span class="pf2-joined">Joined ${joinedTxt(p.joined)}</span></div>
         <div class="pf2-head"><div class="pf2-av">${avatarHTML(104, p)}${ov.rank > 0 ? `<span class="pf2-rank"><small>RANK</small><b>#${fmt(ov.rank)}</b></span>` : ''}</div>
-          <div class="pf2-id"><h1>${esc(p.name)}${ov.online ? ' <span class="online-dot" title="Online now"></span>' : ''}${ov.acct && ov.acct.toLowerCase() !== String(p.name).toLowerCase() ? ` <span class="pf2-user">@${esc(ov.acct)}</span>` : ''}</h1><p class="pf2-bio ${bio ? '' : 'muted'}">${bio ? esc(bio) : 'No bio yet.'}</p></div>
+          <div class="pf2-id"><h1>${esc(p.name)}${ov.admin ? ' ' + ADMIN_TAG : ''}${ov.online ? ' <span class="online-dot" title="Online now"></span>' : ''}${ov.acct && ov.acct.toLowerCase() !== String(p.name).toLowerCase() ? ` <span class="pf2-user">@${esc(ov.acct)}</span>` : ''}</h1><p class="pf2-bio ${bio ? '' : 'muted'}">${bio ? esc(bio) : 'No bio yet.'}</p></div>
           <div class="pf2-actions">${actions || ''}</div></div></section>
       ${ov.after || ''}
       <section class="panel prog"><h2>Collection progress</h2><div class="bar thick"><i style="width:${Math.min(100, uniq / total * 100)}%"></i></div><div class="stat-tiles five">${tiles.map(([v, l]) => `<div class="stat-tile"><b>${v}</b><span>${l}</span></div>`).join('')}</div></section>
@@ -403,7 +407,7 @@
       ${sections}${ov.lite ? '' : `<section><h2>Best cards</h2>${best.length ? `<div class="best-row">${best.map(([id, e]) => `<button class="card-btn" data-act="card" data-id="${id}"${src}>${cardHTML(BYID[id], { holo: e.h > 0, count: e.n, fav: e.f })}</button>`).join('')}</div>` : '<div class="muted">Your best cards show up here once you pull some.</div>'}</section>`}${ov.tail || ''}`;
   }
   function pageProfile() {
-    main().innerHTML = profileHTML(S.profile, S.cards, S.stats, '<button class="btn" data-act="edit-profile">Edit profile</button><a class="btn" href="#collection">View collection</a>', false, { mine: true, show: S.showcase, acct: (auth.session() || {}).u || null, rank: net.state.loaded ? net.rankOf(S.profile) : 0 });
+    main().innerHTML = profileHTML(S.profile, S.cards, S.stats, '<button class="btn" data-act="edit-profile">Edit profile</button><a class="btn" href="#collection">View collection</a>', false, { mine: true, admin: isAdminAcct(S.account), show: S.showcase, acct: (auth.session() || {}).u || null, rank: net.state.loaded ? net.rankOf(S.profile) : 0 });
     $$('.card', main()).forEach(tilt); if (Date.now() - net.state.last > 20000) net.cycle();
   }
 
@@ -955,6 +959,7 @@
   const APPR = 'ss-gacha-approved';
   function accessState() {
     const se = auth && auth.session(); if (!se || !net.enabled()) return 'ok';
+    if (admin && admin.unlocked()) return 'ok'; // the admin never waits for approval
     let cached = false; try { cached = localStorage.getItem(APPR) === se.k; } catch (e) { /* ignore */ }
     const st = net.state;
     if (st.loaded && st.complete && st.accounts.length) {
@@ -999,7 +1004,7 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden) updateHud(); });
   setInterval(updateHud, 1000);
   applyAudio();
-  const ctx = { G, S: () => S, save, toast, modal, closeModal, popOpen, popSet, popClose, popup, esc, $, $$, cardHTML, tilt, avatarHTML, bannerCSS, profileHTML, route, renderHeader, fmt, uid, normalize, hasCopy, takeCopy, addCopy, since, tcls, rarityCmp, busy: () => opening, refreshFeeds: () => refreshFeeds(), notify: function () { return social ? social.notify.apply(null, arguments) : null; },
+  const ctx = { G, S: () => S, isAdminPid, isAdminAcct, ADMIN_TAG, save, toast, modal, closeModal, popOpen, popSet, popClose, popup, esc, $, $$, cardHTML, tilt, avatarHTML, bannerCSS, profileHTML, route, renderHeader, fmt, uid, normalize, hasCopy, takeCopy, addCopy, since, tcls, rarityCmp, busy: () => opening, refreshFeeds: () => refreshFeeds(), notify: function () { return social ? social.notify.apply(null, arguments) : null; },
     setHTML: (el, html) => { if (!el || el.innerHTML === html) return; const y = window.scrollY; el.innerHTML = html; el.classList.add('soft'); window.scrollTo({ top: y, left: 0, behavior: 'instant' }); },
     restore: (j) => { S = normalize(Object.assign({}, j, { account: S.account || null })); save(); location.reload(); },
     loggedIn: () => !!(auth && auth.loggedIn()), allowed: () => accessState() === 'ok', checkReset: () => checkReset(), onSync: () => { if (auth) auth.watch(); if (social) social.scan(); if (auth && auth.loggedIn()) { const a = accessState(); if (a !== lastAccess) route(); } },
@@ -1043,7 +1048,7 @@
   net.loadCache(); // show admin-made card changes straight away; the online sync refreshes them
   // ---------- auto update ----------
   // version.json holds the newest version number. A tab running an older one reloads itself (after uploading its save), so old tabs do not overwrite newer data.
-  const VERSION = 50;
+  const VERSION = 51;
   async function checkVersion() {
     try {
       const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;
@@ -1056,7 +1061,8 @@
   setInterval(() => { if (!document.hidden) checkVersion(); }, 120000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) checkVersion(); });
   setTimeout(checkVersion, 8000);
-  auth.consumeRedirect(); // finishes a sign-in if Discord just sent the player back
-  tick(); route(); net.start();
+  // finishes a sign-in if Discord just sent the player back; otherwise an admin whose short-lived admin pass ran out is quietly logged in again
+  const redirecting = !auth.consumeRedirect() && auth.autoAdmin();
+  if (!redirecting) { tick(); route(); net.start(); }
   window.__ssg = { get S() { return S; }, save, route, net };
 })();

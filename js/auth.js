@@ -29,6 +29,7 @@
   window.SSGAuth = function (ctx) {
     const $ = ctx.$, esc = ctx.esc, net = ctx.net;
     const SESS = 'ss-gacha-session', STATE = 'ss-gacha-dstate';
+    const ADMIN_HINT = 'ss-gacha-admin-acct', SILENT_AT = 'ss-gacha-admin-silent'; // which account was confirmed as admin on this device / when we last tried a silent re-login
     const DKEY = /^d\d{15,19}$/; // account keys are "d" + the Discord user ID
     const view = { busy: false, msg: '', err: '' };
     const dcfg = () => window.SSG_DISCORD || {};
@@ -41,12 +42,12 @@
     const redirectUri = () => String(dcfg().redirect || '').trim() || (location.origin + location.pathname);
 
     // ---------- Discord ----------
-    function start(admin) {
+    function start(admin, silent) {
       const id = String(dcfg().clientId || '').trim();
-      if (!/^\d{15,25}$/.test(id)) { view.err = 'Discord sign-in is not set up yet. The site owner needs to add the Discord Client ID in js/config.js.'; page(); return; }
+      if (!/^\d{15,25}$/.test(id)) { if (silent) return; view.err = 'Discord sign-in is not set up yet. The site owner needs to add the Discord Client ID in js/config.js.'; page(); return; }
       const st = b64e(crypto.getRandomValues(new Uint8Array(16))).replace(/[^A-Za-z0-9]/g, 'x');
-      try { localStorage.setItem(STATE, JSON.stringify({ s: st, at: Date.now(), admin: admin === true })); } catch (e) { view.err = 'This browser blocks storage, so Discord sign-in cannot work.'; page(); return; }
-      location.href = 'https://discord.com/api/oauth2/authorize?' + new URLSearchParams({ client_id: id, response_type: 'token', redirect_uri: redirectUri(), scope: 'identify', state: st }).toString();
+      try { localStorage.setItem(STATE, JSON.stringify({ s: st, at: Date.now(), admin: admin === true, silent: silent === true, ret: silent === true ? location.hash : '' })); } catch (e) { if (silent) return; view.err = 'This browser blocks storage, so Discord sign-in cannot work.'; page(); return; }
+      location.href = 'https://discord.com/api/oauth2/authorize?' + new URLSearchParams(Object.assign({ client_id: id, response_type: 'token', redirect_uri: redirectUri(), scope: 'identify', state: st }, silent ? { prompt: 'none' } : {})).toString();
     }
 
     // Runs once at start-up. If Discord just sent the player back here, read the answer out of the address and finish signing in.
@@ -58,12 +59,19 @@
       if (!p) return false;
       try { history.replaceState(null, '', location.pathname); } catch (e) { /* ignore */ } // keep the token out of the address bar and history
       let want = null; try { want = JSON.parse(localStorage.getItem(STATE) || 'null'); localStorage.removeItem(STATE); } catch (e) { /* ignore */ }
+      const back = () => { try { history.replaceState(null, '', location.pathname + (want && want.ret ? want.ret : '')); } catch (e) { /* ignore */ } };
+      if (want && want.silent) { // automatic admin re-login: never show an error, just carry on as a normal player if it did not work
+        back(); const tk = p.get('access_token');
+        if (tk && p.get('state') === want.s && Date.now() - (want.at || 0) < 900000) { quietAdmin(tk).then(() => { ctx.route(); }); }
+        return true;
+      }
       if (!want || !want.s || p.get('state') !== want.s || Date.now() - (want.at || 0) > 900000) { view.err = 'That sign-in expired. Please try again.'; return true; }
       if (p.get('error')) { view.err = 'Discord sign-in was cancelled.'; return true; }
       const token = p.get('access_token'); if (!token) { view.err = 'Discord did not send back a sign-in. Please try again.'; return true; }
       if (want.admin) { adminFinish(token); return true; } // this round trip was the admin login, not a normal sign-in
       view.busy = true; view.msg = 'Signing you in with Discord...';
-      finish(token).then((created) => {
+      finish(token).then(async (created) => {
+        await quietAdmin(token); // same Discord token: if this is the admin's account, admin is unlocked right away (no second login)
         view.busy = false; view.err = ''; location.hash = '#home'; ctx.route(); net.cycle(true); ctx.toast(created ? 'Account created. Welcome!' : 'Signed in');
       }).catch((ex) => {
         view.busy = false; view.err = ex.user ? ex.message : 'Something went wrong: ' + (ex.message || ex); ctx.route();
@@ -71,15 +79,32 @@
       return true;
     }
 
-    // Admin login: hand the fresh Discord token to the Worker, which asks Discord who it is and only answers if it is the admin's account.
+    // Admin login: hand a fresh Discord token to the Worker, which asks Discord who it is and only answers if it is the admin's account.
+    // Used by the normal sign-in (quietly), by the automatic re-login, and by the manual button in Settings.
+    async function adminExchange(token) {
+      const r = await fetch(net.conf().api + '/__admin/discord', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: token }), cache: 'no-store' });
+      let j = {}; try { j = await r.json(); } catch (e) { /* not JSON */ }
+      if (!r.ok || !j.token) { const e = new Error(r.status === 403 ? 'That Discord account is not an admin.' : (j.message || 'Admin login failed (' + r.status + ').')); e.status = r.status; throw e; }
+      try { sessionStorage.setItem('ss-gacha-admin-token', j.token); sessionStorage.setItem('ss-gacha-admin', '1'); const s = session(); if (s) localStorage.setItem(ADMIN_HINT, s.k); } catch (e) { /* ignore */ }
+    }
+    // Like adminExchange but never complains: a normal player simply is not an admin.
+    async function quietAdmin(token) {
+      if (!net.enabled()) return false;
+      try { await adminExchange(token); return true; }
+      catch (e) { if (e.status === 403) { try { localStorage.removeItem(ADMIN_HINT); } catch (x) { /* ignore */ } } return false; }
+    }
     async function adminFinish(token) {
-      try {
-        const r = await fetch(net.conf().api + '/__admin/discord', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: token }), cache: 'no-store' });
-        let j = {}; try { j = await r.json(); } catch (e) { /* not JSON */ }
-        if (!r.ok || !j.token) throw new Error(r.status === 403 ? 'That Discord account is not an admin.' : (j.message || 'Admin login failed (' + r.status + ').'));
-        try { sessionStorage.setItem('ss-gacha-admin-token', j.token); sessionStorage.setItem('ss-gacha-admin', '1'); } catch (e) { /* ignore */ }
-        ctx.toast('Admin unlocked'); location.hash = '#admin'; ctx.route();
-      } catch (ex) { ctx.toast(ex.message || 'Admin login failed', true); location.hash = '#options'; ctx.route(); }
+      try { await adminExchange(token); ctx.toast('Admin unlocked'); location.hash = '#admin'; ctx.route(); }
+      catch (ex) { ctx.toast(ex.message || 'Admin login failed', true); location.hash = '#options'; ctx.route(); }
+    }
+    // The Worker's admin pass is short-lived and lives only in this tab. If this device has signed in as the admin before, get a new pass
+    // by sending the browser through Discord with prompt=none (no screen is shown if the app is already authorised). Tried at most once a minute.
+    const adminHint = () => { try { const s = session(); return !!s && localStorage.getItem(ADMIN_HINT) === s.k; } catch (e) { return false; } };
+    const adminLive = () => { try { return sessionStorage.getItem('ss-gacha-admin') === '1' && +(sessionStorage.getItem('ss-gacha-admin-token') || '').split('.')[0] > Date.now(); } catch (e) { return false; } };
+    function autoAdmin() {
+      if (!adminHint() || adminLive() || !net.enabled()) return false;
+      try { if (Date.now() - (+localStorage.getItem(SILENT_AT) || 0) < 60000) return false; localStorage.setItem(SILENT_AT, String(Date.now())); } catch (e) { return false; }
+      start(true, true); return true;
     }
 
     // Small avatar for the new profile (the player can change it afterwards in Edit profile). Any failure just means no picture.
@@ -141,7 +166,7 @@
 
     async function logOut() {
       try { if (net.enabled()) await net.cycle(true); } catch (e) { /* ignore */ }
-      try { localStorage.removeItem(SESS); } catch (e) { /* ignore */ }
+      try { localStorage.removeItem(SESS); localStorage.removeItem(ADMIN_HINT); sessionStorage.removeItem('ss-gacha-admin'); sessionStorage.removeItem('ss-gacha-admin-token'); } catch (e) { /* ignore */ } // logging out also locks admin
       location.hash = '#home'; ctx.route();
     }
     // Called after every online sync: sign out only if the admin really deleted this account.
@@ -181,6 +206,6 @@
       const y = $('#auSync'); if (y) y.onclick = async () => { y.disabled = true; const d = $('#auDiag'); d.textContent = 'Saving...'; try { d.textContent = await net.diag(); } catch (e) { d.textContent = 'Failed: ' + (e.message || e); } y.disabled = false; };
     }
 
-    return { loggedIn: loggedIn, session: session, page: page, logOut: logOut, watch: watch, settingsHTML: settingsHTML, bindSettings: bindSettings, consumeRedirect: consumeRedirect, startAdmin: () => start(true) };
+    return { loggedIn: loggedIn, session: session, page: page, logOut: logOut, watch: watch, settingsHTML: settingsHTML, bindSettings: bindSettings, consumeRedirect: consumeRedirect, startAdmin: () => start(true), autoAdmin: autoAdmin, adminHint: adminHint };
   };
 })();

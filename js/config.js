@@ -19,3 +19,8 @@ window.SSG_NET = {
 //           Never put the Client Secret anywhere on this site.
 // redirect: leave empty to use this page's own address. Whatever it is, the exact same address must be added under OAuth2 > Redirects.
 window.SSG_DISCORD = { clientId: '1573467424521457815', redirect: '' };
+
+// Admins: the Discord user IDs that get an "Admin" tag on their profile and in the player list. This is only the label everyone sees.
+// What actually lets someone into the admin page is still the Cloudflare Worker, which checks the Discord account itself.
+// To find an ID: Discord > Settings > Advanced > turn on Developer Mode, then right-click your name > Copy User ID.
+window.SSG_ADMINS = [];
