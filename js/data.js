@@ -389,7 +389,7 @@ Ess Ess Gee Monster`;
   // Difficulty settings. interval = minutes per free pack. luck multiplies the weight of Rare and above.
   // pity = packs in a row with nothing Rare+ before the next one is guaranteed (0 = off).
   const DIFFS = {
-    sigma: { label: 'Sigma', sub: 'Sigma', color: '#e6edf2', interval: 10, cap: 10, start: 10, luck: 0.45, holo: 0.10, pity: 0, packCost: 0 }
+    sigma: { label: 'Sigma', sub: 'Sigma', color: '#e6edf2', interval: 10, cap: 10, start: 10, luck: 0.45, holo: 0.02, pity: 0, packCost: 0 }
   };
 
   // Pack codes. Players type these into the "Code" box. Each code works once per save, case doesn't matter.

@@ -62,12 +62,12 @@
     }
     function cleanPlayer(b, num) {
       const id = idOk(b.id); if (!id) return null;
-      const cards = {};
-      if (b.cards && typeof b.cards === 'object') Object.keys(b.cards).forEach((cid) => { const a = b.cards[cid]; if (BYID[cid] && Array.isArray(a) && +a[0] > 0) { const n = Math.min(9999, +a[0] | 0); cards[cid] = { n: n, h: Math.min(n, Math.max(0, +a[1] | 0)), f: a[2] ? 1 : 0, t: +a[3] || 0, l: +a[4] || 0, p: +a[5] || 0 }; } });
+      const cards = {}, unk = {}; // unk = cards this site does not know right now (an admin removed them): kept so they come back if the card is restored
+      if (b.cards && typeof b.cards === 'object') Object.keys(b.cards).forEach((cid) => { const a = b.cards[cid]; if (!BYID[cid] && /^[\w-]{1,60}$/.test(cid) && Array.isArray(a) && +a[0] > 0 && Object.keys(unk).length < 400) { const n = Math.min(9999, +a[0] | 0); unk[cid] = { n: n, h: Math.min(n, Math.max(0, +a[1] | 0)), f: a[2] ? 1 : 0, t: +a[3] || 0, l: +a[4] || 0, p: +a[5] || 0 }; } if (BYID[cid] && Array.isArray(a) && +a[0] > 0) { const n = Math.min(9999, +a[0] | 0); cards[cid] = { n: n, h: Math.min(n, Math.max(0, +a[1] | 0)), f: a[2] ? 1 : 0, t: +a[3] || 0, l: +a[4] || 0, p: +a[5] || 0 }; } });
       const wish = Array.isArray(b.wish) ? b.wish.filter((x) => typeof x === 'string' && BYID[x]).slice(0, 300) : [];
       const wk = b.wk && +b.wk.t === weekStart(Date.now()) && +b.wk.v === 2 ? Math.max(0, +b.wk.s || 0) : null; // v2 = baseline taken with the 10-point scoring
       const pl = derive({ id: id, name: nm(b.name), hue: Number.isFinite(+b.hue) ? ((+b.hue % 360) + 360) % 360 : 28, pfp: okImg(b.pfp), banner: okImg(b.banner), joined: +b.joined || 0, seen: +b.seen || 0,
-        mod: +(b.save && b.save.mod) || +b.seen || 0, opened: +(b.opened) || 0, pulls: +(b.pulls) || 0, ra: +b.ra || 0, cards: cards, num: num, full: true, raw: b.save && typeof b.save === 'object' ? b.save : null });
+        mod: +(b.save && b.save.mod) || +b.seen || 0, opened: +(b.opened) || 0, pulls: +(b.pulls) || 0, ra: +b.ra || 0, cards: cards, unk: unk, num: num, full: true, raw: b.save && typeof b.save === 'object' ? b.save : null });
       pl.show = Array.isArray(b.show) ? b.show.filter((x) => typeof x === 'string' && /\|[01]$/.test(x)).slice(0, 5) : [];
       pl.wish = wish; pl.week = wk == null ? 0 : Math.max(0, pl.score - wk); pl.bio = String(b.bio == null ? '' : b.bio).replace(/[\r\n\t]+/g, ' ').trim().slice(0, 120);
       return pl;
@@ -213,17 +213,28 @@
     // ---------- publishing my account ----------
     function build() {
       const s = S(), p = s.profile, cards = {};
-      Object.keys(s.cards).forEach((id) => { const e = s.cards[id]; if (BYID[id] && e.n > 0) cards[id] = [e.n, e.h || 0, e.f ? 1 : 0, e.t || 0, e.l || 0, e.p || 0]; });
+      Object.keys(s.cards).forEach((id) => { const e = s.cards[id]; if (/^[\w-]{1,60}$/.test(id) && e.n > 0) cards[id] = [e.n, e.h || 0, e.f ? 1 : 0, e.t || 0, e.l || 0, e.p || 0]; });
       const ws = weekStart(Date.now()); if (!s.wk || s.wk.t < ws || s.wk.v !== 2) s.wk = { t: ws, s: G.scoreOf(s.cards), v: 2 };
       return { t: 'player', v: 1, ra: s.resetAt || 0, id: p.id, name: p.name, bio: p.bio || '', hue: p.hue, pfp: p.pfp, banner: p.banner, joined: p.joined, seen: Date.now(), opened: s.stats.opened, pulls: s.stats.pulls, cards: cards, wish: Object.keys(s.wish || {}).filter((x) => BYID[x]).slice(0, 300), wk: s.wk, show: s.showcase || [],
         save: { wish: s.wish || {}, wk: s.wk, showcase: s.showcase || [], mod: s.mod || 0, granted: s.granted, packs: s.packs, bonus: s.bonus || 0, last: s.last, sinceRare: s.sinceRare, started: s.started, stats: s.stats, codes: s.codes, net: s.net, social: s.social } };
     }
     // Uploads this device's save to the account's player issue. s.syncMod remembers which version the cloud holds, so a stale device can tell it must merge first.
-    async function publish(force, keep) {
-      const s = S(), c = conf(), snap = build(), key = JSON.stringify(Object.assign({}, snap, { seen: 0 }));
+    async function publish(force, keep, again) {
+      const s = S(), c = conf(), snap = build(), key = JSON.stringify(Object.assign({}, snap, { seen: 0 })), M = window.SSGMerge;
+      const nextBase = M.makeBase({ cards: s.cards, bonus: s.bonus, stats: s.stats, net: s.net }, (id) => /^[\w-]{1,60}$/.test(id)), spSent = s.sp || 0; // what the cloud will hold after this upload
       if (net.cfg.blocked.some((x) => x.id === s.profile.id)) return; // removed from the leaderboard by the admin
       const mine = net.dir.find(isMe) || (net.myNum && Date.now() - net.createdAt < 120000 ? { num: net.myNum } : null); // the new-issue shortcut only covers GitHub's short listing delay
       if (!force && key === net.lastKey && Date.now() - net.lastBeat < BEAT_MS && (mine || Date.now() - net.createdAt < 120000)) return;
+      // Never write over a newer cloud save. If another device uploaded since this one last synced, bring that in first (3-way merge), then upload the result.
+      // Without this a stale phone or tab replaced the newer save and wiped the other device's new cards and finished trades.
+      if (mine && mine.num && !keep && !again) {
+        let cur = null; try { const r = await gh('GET', `/repos/${c.repo}/issues/${mine.num}`); cur = cleanPlayer(JSON.parse(r.body), mine.num); } catch (e) { if (e.status && e.status !== 404 && e.status !== 410) throw e; }
+        if (cur && (cur.mod || 0) > (s.syncMod || 0) && G.needReset(s.account) <= (cur.ra || 0)) {
+          if (ctx.busy() || s.overwrite) return; // a pack opening is on screen: the save cannot be swapped now, the next sync does it
+          ctx.mergeCloud(cur, (s.mod || 0) > (s.syncMod || 0) || !cur.raw);
+          return publish(true, keep, true);
+        }
+      }
       let body = JSON.stringify(snap);
       if (body.length > MAX_BODY) { delete snap.banner; body = JSON.stringify(snap); }
       if (body.length > MAX_BODY) { delete snap.pfp; body = JSON.stringify(snap); }
@@ -236,7 +247,7 @@
         net.createdAt = Date.now();
       } else return;
       net.lastKey = key; net.lastBeat = Date.now();
-      s.syncMod = snap.save.mod; delete s.overwrite; ctx.save(true);
+      s.syncMod = snap.save.mod; s.base = nextBase; s.sp = Math.max(0, (s.sp || 0) - spSent); delete s.overwrite; ctx.save(true);
       if (mine) mine.mod = snap.save.mod;
     }
     // Plain-English report used by the Account panel in Settings.
@@ -311,9 +322,17 @@
     function flush() {
       try {
         const s = S(); if (!enabled() || !ctx.loggedIn() || !ctx.allowed() || ctx.busy() || (s.mod || 0) <= (s.syncMod || 0)) return;
-        const mine = net.dir.find(isMe); if (!mine) return;
+        const mine = net.dir.find(isMe); if (!mine || (mine.mod || 0) > (s.syncMod || 0)) return; // the cloud moved on: merge on the next open instead of overwriting it
         publish(true, true).catch(() => {});
       } catch (e) { /* ignore */ }
+    }
+
+    // Waits for any running sync, then runs one more and reports whether it worked. Used before things that must start from the newest save
+    // (opening packs, sending or accepting a trade).
+    async function syncNow() {
+      if (!enabled() || !ctx.loggedIn() || !ctx.allowed()) return false;
+      for (let i = 0; i < 40 && net.busy; i++) await new Promise((r) => setTimeout(r, 150));
+      await cycle(true); return net.status === 'ok';
     }
 
     // ---------- trading ----------
@@ -357,6 +376,7 @@
       if (wrote) ctx.save();
     }
     async function createTrade(toId, give, want, msg, re) {
+      await syncNow().catch(() => {}); // start from the newest save, so the cards offered are really still owned
       const s = S(), c = conf(), to = net.dir.find((p) => p.id === toId);
       if (!to) throw new Error('Player not found');
       if (!give.length && !want.length) throw new Error('Pick at least one card');
@@ -374,6 +394,7 @@
       } catch (e) { give.forEach((it) => ctx.addCopy(it.id, it.h)); delete s.net.out[tid]; ctx.save(); throw e; }
     }
     async function accept(tid) {
+      await syncNow().catch(() => {});
       const s = S(), c = conf(), tr = net.trades.find((t) => t.id === tid);
       if (!tr || tr.status !== 'open' || s.net.done[tid]) { toast('That offer is not available any more', true); return; }
       try { const cur = await gh('GET', `/repos/${c.repo}/issues/${tr.num}`), b = JSON.parse(cur.body); if (b.status !== 'open') { toast('That offer is not available any more', true); await cycle(true); return; } }
@@ -547,7 +568,7 @@
       const tile = (id, e) => {
         const c = BYID[id], p = (o.sel[id + '|0'] || 0) + (o.sel[id + '|1'] || 0), cheapest = e.n - e.h > 0 ? unit(id, 0) : unit(id, 1);
         const pv = Object.keys(o.sel).filter((k) => k.split('|')[0] === id).reduce((a, k) => a + o.sel[k] * unit(id, k.slice(-2) === '|1'), 0);
-        const chip = o.catalog || e.n < 2 ? '' : '×' + e.n + (e.h && e.h < e.n ? ' · ' + e.h + '✦' : ''), lab = o.label ? o.label(id, e) : null;
+        const chip = o.catalog ? '' : ctx.copiesText(e.n, e.h), lab = o.label ? o.label(id, e) : null;
         return `<button type="button" class="pk-tile ${p ? 'picked' : ''}" data-pick="${id}" aria-pressed="${!!p}" aria-label="${esc(c.name)}">${ctx.cardHTML(c, { holo: e.h > 0, size: 112, copiesText: chip })}${p ? `<span class="tr-n">${o.kinds || o.catalog ? '✓' : p + '/' + e.n}</span>` : ''}${o.noval ? '' : `<span class="pk-val ${o.neg ? 'neg' : 'pos'} ${p ? 'on' : ''}">${o.neg ? '−' : '+'}${ctx.fmt(p ? pv : cheapest)}</span>`}${lab ? `<span class="pk-lab ${lab[0]}">${esc(lab[1])}</span>` : ''}</button>`;
       };
       const draw = () => {
@@ -555,6 +576,8 @@
         grid.innerHTML = ids.length ? ids.map((id) => tile(id, view(cards[id]))).join('') : '<p class="muted small pk-none">No cards match these filters.</p>';
         grid.scrollTop = keep; $$('.card', grid).forEach(ctx.tilt); if (o.onChange) o.onChange();
       };
+      // Which individual copies are ticked (tiles in the copy popup). o.sel only keeps the count; this remembers WHICH tiles, so clicking one never ticks the ones before it.
+      const ix = (k) => { o.ix = o.ix || {}; const n = o.sel[k] || 0; let s = o.ix[k]; if (!s || s.size !== n) { s = new Set(); for (let i = 0; i < n; i++) s.add(i); o.ix[k] = s; } return s; };
       const flip = (id, h) => { const k = id + '|' + h; if (o.sel[k]) delete o.sel[k]; else if (total() >= o.max) toast('You can pick up to ' + o.max + ' cards here', true); else o.sel[k] = 1; };
       const setN = (k, n, max) => { const others = total() - (o.sel[k] || 0); n = Math.max(0, Math.min(max, n, o.max - others)); if (n) o.sel[k] = n; else delete o.sel[k]; if (others + n >= o.max) toast('You can pick up to ' + o.max + ' cards here'); };
       const popHTML = (id) => {
@@ -562,7 +585,7 @@
         const nn = e.n - e.h, one = o.kinds || o.catalog, picked = (o.sel[id + '|0'] || 0) + (o.sel[id + '|1'] || 0), vchip = (h, on) => (o.noval ? '' : `<span class="pk-val ${o.neg ? 'neg' : 'pos'} ${on ? 'on' : ''}">${o.neg ? '−' : '+'}${ctx.fmt(unit(id, h))}</span>`);
         let tiles = '';
         if (one) tiles = [nn > 0 ? 0 : null, e.h > 0 ? 1 : null].filter((h) => h !== null).map((h) => `<button type="button" class="pop-copy ${o.sel[id + '|' + h] ? 'on' : ''}" data-kind="${h}" aria-pressed="${!!o.sel[id + '|' + h]}">${ctx.cardHTML(c, { holo: !!h, size: 112 })}<span class="pop-lab">${h ? '✦ Skibidi' : 'Normal'}${o.catalog ? '' : ' ×' + (h ? e.h : nn)}</span>${vchip(h, o.sel[id + '|' + h])}</button>`).join('');
-        else [[0, nn], [1, e.h]].forEach(([h, n]) => { for (let i = 0; i < Math.min(n, 60); i++) { const on = i < (o.sel[id + '|' + h] || 0); tiles += `<button type="button" class="pop-copy ${on ? 'on' : ''}" data-copy="${id}|${h}|${i}" aria-pressed="${on}">${ctx.cardHTML(c, { holo: !!h, size: 112 })}${vchip(h, on)}</button>`; } });
+        else [[0, nn], [1, e.h]].forEach(([h, n]) => { for (let i = 0; i < Math.min(n, 60); i++) { const on = ix(id + '|' + h).has(i); tiles += `<button type="button" class="pop-copy ${on ? 'on' : ''}" data-copy="${id}|${h}|${i}" aria-pressed="${on}">${ctx.cardHTML(c, { holo: !!h, size: 112 })}${vchip(h, on)}</button>`; } });
         return `<div class="pop-head"><div class="pop-title"><b>#${c.rank} ${esc(c.name)}</b><span class="muted small">${one ? (o.catalog ? 'Pick the version you want' : 'Pick the version to use') : `${picked} / ${e.n} picked`}</span></div><button type="button" class="pop-x" data-act="close-pop" aria-label="Close">✕</button></div>
           <div class="pop-copies">${tiles}</div>${one ? '' : '<div class="pop-foot"><span class="muted small">Tap a copy to pick it</span><span class="row"><button type="button" class="btn sm" data-all>All</button><button type="button" class="btn sm" data-none>None</button></span></div>'}`;
       };
@@ -574,7 +597,7 @@
         const el = ctx.popOpen(t, popHTML(id), { key: key, cls: 'pick' });
         el.onclick = (e2) => {
           const cp = e2.target.closest('[data-copy]'), kd = e2.target.closest('[data-kind]'), al = e2.target.closest('[data-all]'), no = e2.target.closest('[data-none]'), v = view(o.cards()[id]); if (!v) return;
-          if (cp) { const [, h, i] = cp.dataset.copy.split('|'), k = id + '|' + h, cur = o.sel[k] || 0; setN(k, +i < cur ? +i : +i + 1, h === '1' ? v.h : v.n - v.h); }
+          if (cp) { const [, h, i] = cp.dataset.copy.split('|'), k = id + '|' + h, s = ix(k), had = s.has(+i), want = s.size + (had ? -1 : 1); setN(k, want, h === '1' ? v.h : v.n - v.h); if ((o.sel[k] || 0) === want) { if (had) s.delete(+i); else s.add(+i); } }
           else if (kd) flip(id, +kd.dataset.kind);
           else if (al) { setN(id + '|0', v.n - v.h, v.n - v.h); setN(id + '|1', v.h, v.h); }
           else if (no) { delete o.sel[id + '|0']; delete o.sel[id + '|1']; }
@@ -768,6 +791,6 @@
     }
     // The Online panel in Settings is switched off. Return settingsHTML/bindSettings below to bring it back (share toggle, own token, restore from cloud).
     const SHOW_SETTINGS = false;
-    return { approvedPid: approvedPid, rankOf: rankOf, logRedeem: logRedeem, weekStart: weekStart, log: (text) => updateConfig(() => {}, text), gh: gh, conf: conf, enabled: enabled, refresh: refresh, updateConfig: updateConfig, saveCardImage: saveCardImage, closeIssue: closeIssue, createIssue: createIssue, loadCache: loadCache, start: start, touch: touch, flush: flush, diag: diag, paint: paint, cycle: cycle, pageBoard: pageBoard, pagePost: pagePost, pageTrade: pageTrade, incoming: incoming, outgoing: outgoing, recentPulls: recentPulls, pagePlayers: pagePlayers, pageUser: pageUser, pageTrades: pageTrades, settingsHTML: () => (SHOW_SETTINGS ? settingsHTML() : ''), bindSettings: () => { if (SHOW_SETTINGS) bindSettings(); }, state: net, build: build };
+    return { approvedPid: approvedPid, rankOf: rankOf, logRedeem: logRedeem, weekStart: weekStart, log: (text) => updateConfig(() => {}, text), gh: gh, conf: conf, enabled: enabled, refresh: refresh, updateConfig: updateConfig, saveCardImage: saveCardImage, closeIssue: closeIssue, syncNow: syncNow, createIssue: createIssue, loadCache: loadCache, start: start, touch: touch, flush: flush, diag: diag, paint: paint, cycle: cycle, pageBoard: pageBoard, pagePost: pagePost, pageTrade: pageTrade, incoming: incoming, outgoing: outgoing, recentPulls: recentPulls, pagePlayers: pagePlayers, pageUser: pageUser, pageTrades: pageTrades, settingsHTML: () => (SHOW_SETTINGS ? settingsHTML() : ''), bindSettings: () => { if (SHOW_SETTINGS) bindSettings(); }, state: net, build: build };
   };
 })();

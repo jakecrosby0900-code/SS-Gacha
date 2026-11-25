@@ -164,3 +164,15 @@ Open tabs check `version.json` every couple of minutes and reload themselves whe
 - Card page 3D: a card you do not own (for example in the Index) is grey all over: front, back and rim.
 - Pack opening: the flip is smooth again. The v40 rule that hides the card back now waits until the card has turned past edge-on (0.15s) instead of hiding it on the first frame, which had left an empty card for the first part of the turn.
 
+
+## v54 notes
+- **Cards no longer vanish across devices.** Two causes were fixed: (1) an out-of-date device (phone, second tab) could upload over a newer cloud save, wiping the other device's new pulls and finished trades; uploads now read the cloud copy first and merge instead of overwriting. (2) The merge took the larger count of each card, which resurrected traded-away cards and lost anything else; it is now a three-way merge (`js/merge.js`): the cloud's cards plus what this device changed since its last sync (`save.base`), so a trade on one device and a pack on another both survive. Packs spent, bonus packs, packs opened and trade bookkeeping merge the same way.
+- Opening a pack, sending a trade and accepting a trade first sync with the account, so the same pack cannot be opened on two devices.
+- Card page: letting go while spinning keeps the card turning and slows it with friction.
+- Picking copies in the trade/board picker ticks only the copy you click (it used to tick every copy before it).
+- Card counts read like `×1 skibidi ×7 normal`; Community rare pulls say "skibidi" instead of a star.
+
+## v55 notes
+- Opening a pack now needs a successful sync with the account (so two offline devices cannot both open the same pack). If the server cannot be reached it says so and you try again.
+- Tabs of the same browser share one save: a tab that sees another tab's save takes it over instead of overwriting it later.
+- Cards the site does not recognise (an admin deleted them) are kept in the player's cloud save instead of being dropped, so they return when the admin restores the card.

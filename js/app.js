@@ -67,6 +67,13 @@
     if (passive !== true) { S.mod = Math.max(Date.now(), (S.mod || 0) + 1); if (net && auth && auth.loggedIn()) net.touch(); }
     const j = JSON.stringify(S); try { localStorage.setItem(KEY, j); } catch (e) { memorySave = j; }
   }
+  // Another tab of this browser wrote the save: take it over, so a tab that has been sitting idle never saves its old copy over the newer one.
+  addEventListener('storage', (e) => {
+    if (e.key !== KEY || !e.newValue || e.storageArea !== localStorage) return;
+    if (opening) { stalePending = true; return; }
+    try { S = normalize(JSON.parse(e.newValue)); renderHeader(); route(true); } catch (er) { /* ignore */ }
+  });
+  let stalePending = false;
   const D = () => DIFFS.sigma;
   const CARDS_PER_PACK = 5;
   // Packs you can open = packs earned by waiting (S.packs, capped) + bonus packs from codes and gifts (S.bonus, no cap, never expire).
@@ -170,9 +177,11 @@
         <div class="card-body"><div class="card-name ${c.name.length > 24 ? 'long' : ''}">${o.locked ? '???' : esc(c.name)}</div></div>
       </div>
       <div class="foil"></div><div class="glare"></div>${sp}
-      ${o.copiesText || o.count > 1 ? `<span class="copies">${o.copiesText || '×' + o.count}</span>` : ''}${o.holo ? '<span class="holo-badge">✦ SKIBIDI</span>' : ''}${o.fav ? '<span class="fav">★</span>' : ''}
+      ${(o.copiesText != null ? o.copiesText : copiesText(o.count, o.sk)) ? `<span class="copies">${o.copiesText != null ? o.copiesText : copiesText(o.count, o.sk)}</span>` : ''}${o.holo ? '<span class="holo-badge">✦ SKIBIDI</span>' : ''}${o.fav ? '<span class="fav">★</span>' : ''}
     </div>`;
   }
+  // '×1 skibidi ×7 normal' for a stack with both kinds, '×N' when there is only one kind. Nothing for a single copy (the SKIBIDI badge already shows).
+  function copiesText(n, h) { n = +n || 0; h = Math.min(n, Math.max(0, +h || 0)); if (n < 2) return ''; return h ? '×' + h + ' skibidi' + (n > h ? ' ×' + (n - h) + ' normal' : '') : '×' + n; }
   // 3D tilt for packs: rotates toward the pointer and moves the foil sheen.
   function packTilt(el) {
     if (!el || el._pt) return; el._pt = 1;
@@ -387,7 +396,7 @@
   function profileHTML(p, cards, stats, actions, full, ov) {
     ov = ov || {};
     const ents = Object.entries(cards).filter(([id, e]) => BYID[id] && e.n > 0), src = ov.src ? ` data-src="${esc(ov.src)}"` : '';
-    const row = (list, empty) => list.length ? `<div class="card-row">${list.map(([id, e]) => `<button class="card-btn" data-act="card" data-id="${id}"${src}>${cardHTML(BYID[id], { holo: e.h > 0, count: e.n, fav: e.f })}</button>`).join('')}</div>` : `<div class="empty"><p>${empty}</p></div>`;
+    const row = (list, empty) => list.length ? `<div class="card-row">${list.map(([id, e]) => `<button class="card-btn" data-act="card" data-id="${id}"${src}>${cardHTML(BYID[id], { holo: e.h > 0, count: e.n, sk: e.h, fav: e.f })}</button>`).join('')}</div>` : `<div class="empty"><p>${empty}</p></div>`;
     const byRar = (a, b) => BYID[b[0]].ti - BYID[a[0]].ti || BYID[a[0]].rank - BYID[b[0]].rank;
     const recent = ents.slice().sort((a, b) => lastSeen(b[1]) - lastSeen(a[1])).slice(0, 12);
     const favs = ents.filter(([, e]) => e.f).sort(byRar);
@@ -404,7 +413,7 @@
       ${ov.after || ''}
       <section class="panel prog"><h2>Collection progress</h2><div class="bar thick"><i style="width:${Math.min(100, uniq / total * 100)}%"></i></div><div class="stat-tiles five">${tiles.map(([v, l]) => `<div class="stat-tile"><b>${v}</b><span>${l}</span></div>`).join('')}</div></section>
       ${ov.lite ? '' : `<section><h2>Badges</h2>${badgeTilesHTML(tierBadges(cards, stats.opened || 0, ov.rank || 0))}</section>`}
-      ${sections}${ov.lite ? '' : `<section><h2>Best cards</h2>${best.length ? `<div class="best-row">${best.map(([id, e]) => `<button class="card-btn" data-act="card" data-id="${id}"${src}>${cardHTML(BYID[id], { holo: e.h > 0, count: e.n, fav: e.f })}</button>`).join('')}</div>` : '<div class="muted">Your best cards show up here once you pull some.</div>'}</section>`}${ov.tail || ''}`;
+      ${sections}${ov.lite ? '' : `<section><h2>Best cards</h2>${best.length ? `<div class="best-row">${best.map(([id, e]) => `<button class="card-btn" data-act="card" data-id="${id}"${src}>${cardHTML(BYID[id], { holo: e.h > 0, count: e.n, sk: e.h, fav: e.f })}</button>`).join('')}</div>` : '<div class="muted">Your best cards show up here once you pull some.</div>'}</section>`}${ov.tail || ''}`;
   }
   function pageProfile() {
     main().innerHTML = profileHTML(S.profile, S.cards, S.stats, '<button class="btn" data-act="edit-profile">Edit profile</button><a class="btn" href="#collection">View collection</a>', false, { mine: true, admin: isAdminAcct(S.account), show: S.showcase, acct: (auth.session() || {}).u || null, rank: net.state.loaded ? net.rankOf(S.profile) : 0 });
@@ -474,7 +483,7 @@
   // Legendary-or-better cards other players picked up most recently (read from their published collections).
   function pullsFeedHTML() {
     const l = net.recentPulls(12);
-    return l.length ? l.map((x) => `<a class="feed-row pull" style="--tc:var(--${tcls(x.card.tier)})" href="#user-${esc(x.id)}"><span class="tag">${esc(x.card.tier.toUpperCase())}</span><span class="grow"><b>${esc(x.name)}</b> pulled #${x.card.rank} ${esc(x.card.name)}${x.holo ? ' ✦' : ''}</span><small class="muted">${since(x.at)}</small></a>`).join('')
+    return l.length ? l.map((x) => `<a class="feed-row pull" style="--tc:var(--${tcls(x.card.tier)})" href="#user-${esc(x.id)}"><span class="tag">${esc(x.card.tier.toUpperCase())}</span><span class="grow"><b>${esc(x.name)}</b> pulled #${x.card.rank} ${esc(x.card.name)}${x.holo ? ' <b class="pull-sk">skibidi</b>' : ''}</span><small class="muted">${since(x.at)}</small></a>`).join('')
       : `<p class="muted small">${net.enabled() ? 'Nothing yet. Legendary and better pulls from every player show up here.' : 'Rare pulls from other players show up here once the site is online.'}</p>`;
   }
   function refreshFeeds() { const a = $('#feedTrades'), b = $('#feedPulls'); if (a) a.innerHTML = tradesFeedHTML(); if (b) b.innerHTML = pullsFeedHTML(); }
@@ -482,7 +491,7 @@
   function pageHome() {
     const d = D(), ents = Object.entries(S.cards).filter(([id, e]) => BYID[id] && e.n > 0), have = ents.length, total = CARDS.length || 1;
     const sk = ents.filter(([, e]) => e.h > 0).length, copies = ents.reduce((a, [, e]) => a + e.n, 0);
-    const row = (list, empty) => list.length ? `<div class="card-row h">${list.map(([id, e]) => `<button class="card-btn" data-act="card" data-id="${id}">${cardHTML(BYID[id], { holo: e.h > 0, count: e.n, fav: e.f })}</button>`).join('')}</div>` : `<div class="empty"><p>${empty}</p></div>`;
+    const row = (list, empty) => list.length ? `<div class="card-row h">${list.map(([id, e]) => `<button class="card-btn" data-act="card" data-id="${id}">${cardHTML(BYID[id], { holo: e.h > 0, count: e.n, sk: e.h, fav: e.f })}</button>`).join('')}</div>` : `<div class="empty"><p>${empty}</p></div>`;
     const featured = CARDS.filter((c) => !c.monster || S.cards[c.id]).sort((a, b) => b.ti - a.ti || a.rank - b.rank).slice(0, 7);
     const tiles = [[pct2(have / total * 100), `Completion (${have} / ${CARDS.length})`], [fmt(copies), 'Cards owned'], [pct2(sk / total * 100), `Skibidi (${sk} / ${CARDS.length})`], [fmt(S.stats.opened), 'Packs opened'], [fmt(score()), 'Points']];
     main().innerHTML = `<section class="panel hero2">
@@ -497,7 +506,7 @@
         <div class="stat-tiles five">${tiles.map(([v, l]) => `<div class="stat-tile"><b>${v}</b><span>${l}</span></div>`).join('')}</div></section>
       <section><h2>Recently collected</h2>${row(ents.slice().sort((a, b) => lastSeen(b[1]) - lastSeen(a[1])).slice(0, 7), 'No cards yet. Open your first pack.')}</section>
       <section><h2>Your rarest cards</h2>${row(ents.slice().sort(rarityCmp).slice(0, 7), 'Your rarest cards show up here once you pull some.')}</section>
-      <section><h2>Featured: the rarest cards in the game</h2><div class="card-row h">${featured.map((c) => { const x = S.cards[c.id]; return `<button class="card-btn" data-act="card" data-id="${c.id}">${cardHTML(c, { ghost: !x, holo: x && x.h > 0, count: x && x.n })}</button>`; }).join('')}</div></section>
+      <section><h2>Featured: the rarest cards in the game</h2><div class="card-row h">${featured.map((c) => { const x = S.cards[c.id]; return `<button class="card-btn" data-act="card" data-id="${c.id}">${cardHTML(c, { ghost: !x, holo: x && x.h > 0, count: x && x.n, sk: x && x.h })}</button>`; }).join('')}</div></section>
       <div class="feeds"><section class="panel feed"><h2>Recent trades</h2><div id="feedTrades">${tradesFeedHTML()}</div></section><section class="panel feed"><h2>Community rare pulls</h2><div id="feedPulls">${pullsFeedHTML()}</div></section></div>
       <p class="muted small hint">Shortcuts: <kbd>O</kbd> open pack · <kbd>A</kbd> open all · <kbd>1</kbd>–<kbd>7</kbd> switch pages · <kbd>/</kbd> search · right-click any card for its odds</p>`;
     $$('.h2-mid .pack', main()).forEach(packTilt); $$('.card', main()).forEach(tilt); updateHud(); if (net.enabled() && Date.now() - net.state.last > 20000) net.cycle();
@@ -520,7 +529,7 @@
       list = list.filter((c) => { const x = e(c); switch (colState.show) { case 'owned': return !!x; case 'missing': return !x; case 'holo': return x && x.h > 0; case 'spare': return x && x.n > 1; case 'fav': return x && x.f; case 'wish': return !!S.wish[c.id]; default: return true; } });
       const by = { rank: (a, b) => a.rank - b.rank, name: (a, b) => a.name.localeCompare(b.name), recent: (a, b) => (e(b)?.t || 0) - (e(a)?.t || 0), copies: (a, b) => (e(b)?.n || 0) - (e(a)?.n || 0) || a.rank - b.rank };
       list.sort((a, b) => ((e(b) && e(b).f) ? 1 : 0) - ((e(a) && e(a).f) ? 1 : 0) || by[colState.sort](a, b)); // favorites always come first
-      $('#colgrid').innerHTML = list.length ? `<div class="card-grid">${list.map((c) => { const x = e(c); const v = x ? (colVar[c.id] != null && (colVar[c.id] ? x.h > 0 : x.n - x.h > 0) ? colVar[c.id] : (x.h > 0 ? 1 : 0)) : 0; return `<div class="col-item ${x && x.n > 1 ? 'has-dupes' : ''} ${S.wish[c.id] ? 'wished' : ''}"><button class="card-btn" data-act="card" data-id="${c.id}" data-var="${v}" ${x ? '' : 'aria-label="Not found yet"'}>${cardHTML(c, { locked: !x, holo: x && v === 1, count: x && x.n, fav: x && x.f })}</button></div>`; }).join('')}</div>` : '<div class="empty"><h2>Nothing here</h2><p class="muted">No cards match these filters.</p></div>';
+      $('#colgrid').innerHTML = list.length ? `<div class="card-grid">${list.map((c) => { const x = e(c); const v = x ? (colVar[c.id] != null && (colVar[c.id] ? x.h > 0 : x.n - x.h > 0) ? colVar[c.id] : (x.h > 0 ? 1 : 0)) : 0; return `<div class="col-item ${x && x.n > 1 ? 'has-dupes' : ''} ${S.wish[c.id] ? 'wished' : ''}"><button class="card-btn" data-act="card" data-id="${c.id}" data-var="${v}" ${x ? '' : 'aria-label="Not found yet"'}>${cardHTML(c, { locked: !x, holo: x && v === 1, count: x && x.n, sk: x && x.h, fav: x && x.f })}</button></div>`; }).join('')}</div>` : '<div class="empty"><h2>Nothing here</h2><p class="muted">No cards match these filters.</p></div>';
       $$('#colgrid .card').forEach(tilt);
     };
     $('#colq').oninput = (ev) => { colState.q = ev.target.value; draw(); };
@@ -536,7 +545,7 @@
     main().innerHTML = `<h1>Index</h1><p class="muted">Every card in the game, grouped by set. Greyed-out cards are ones you haven't pulled yet, and they light up the moment you get them. Right-click any card for its rarity and details.</p>` + cats.map((k) => {
       const list = CARDS.filter((c) => c.cat === k).sort((a, b) => b.ti - a.ti || a.name.localeCompare(b.name)), got = list.filter((c) => S.cards[c.id]).length;
       return `<section class="panel set"><div class="set-head"><div><h2>${k}</h2><p class="muted small">${CATS[k].blurb}</p></div><div class="set-prog"><b>${got}/${list.length}</b><div class="bar"><i style="width:${got / list.length * 100}%"></i></div></div></div>
-        <div class="card-grid small idx-grid">${list.map((c) => { const x = S.cards[c.id]; return `<button class="card-btn" data-act="card" data-id="${c.id}">${cardHTML(c, { ghost: !x && !c.monster, locked: !x && c.monster, holo: x && x.h > 0, count: x && x.n, size: 128 })}</button>`; }).join('')}</div></section>`;
+        <div class="card-grid small idx-grid">${list.map((c) => { const x = S.cards[c.id]; return `<button class="card-btn" data-act="card" data-id="${c.id}">${cardHTML(c, { ghost: !x && !c.monster, locked: !x && c.monster, holo: x && x.h > 0, count: x && x.n, sk: x && x.h, size: 128 })}</button>`; }).join('')}</div></section>`;
     }).join('') + `<section class="panel"><h2>By rarity</h2><div class="tier-prog">${TIERS.map((t, i) => { const l = G.BYTIER[i], g = l.filter((c) => S.cards[c.id]).length; return `<div class="${tcls(t)}"><span>${t}</span><div class="bar"><i style="width:${l.length ? g / l.length * 100 : 0}%"></i></div><b>${g}/${l.length}</b></div>`; }).join('')}</div></section>`;
     $$('.idx-grid .card', main()).forEach(tilt);
   }
@@ -670,7 +679,7 @@
   function cardView(id, src, v) {
     if (!BYID[id]) return; popClose();
     const old = $('.modal-bg .cardview'); if (old) closeModal(old.closest('.modal-bg'));
-    const other = src ? net.state.dir.find((p) => p.id === src) : null; cv.id = id; cv.src = other && other.id !== S.profile.id ? other.id : ''; cv.rx = cv.ry = 0;
+    const other = src ? net.state.dir.find((p) => p.id === src) : null; if (cv.stop) cv.stop(); cv.id = id; cv.src = other && other.id !== S.profile.id ? other.id : ''; cv.rx = cv.ry = 0;
     const e = cvCards()[id]; cv.v = e && e.h > 0 ? 1 : 0; if (v === 0 || v === 1) cv.v = v; // cvDraw corrects it if you do not own that version
     modal('<div class="cv"></div>', 'cardview'); cvDraw();
   }
@@ -729,18 +738,37 @@
   function cardPopRefresh() { if ($('.cardview .cv')) cvDraw(); }
   // dragging the card spins it; Flip turns it over; Reset brings it back
   (function () {
-    let dr = null;
-    document.addEventListener('pointerdown', (e) => { const st = e.target.closest && e.target.closest('.cv-stage'); if (!st) return; dr = { x: e.clientX, y: e.clientY, rx: cv.rx, ry: cv.ry }; try { st.setPointerCapture(e.pointerId); } catch (er) { /* ignore */ } const d = $('.cv-3d', st); if (d) d.style.transition = 'none'; });
+    let dr = null, raf = 0, hist = [];
+    // Letting go while spinning keeps the card turning: it carries the speed of the last moments of the drag and slows down by friction.
+    const stopSpin = () => { if (raf) cancelAnimationFrame(raf); raf = 0; };
+    cv.stop = stopSpin;
+    function coast(v) {
+      let last = performance.now();
+      const frame = (now) => {
+        const d = $('.cardview .cv-3d'); if (!d) { raf = 0; return; }
+        const dt = Math.min(50, now - last), k = dt / 16.667; last = now;
+        cv.ry += v * dt; v *= Math.pow(0.97, k); cv.rx += (0 - cv.rx) * (1 - Math.pow(0.9, k));
+        if (Math.abs(v) < 0.01 && Math.abs(cv.rx) < 0.2) { cv.rx = 0; cvApply(); raf = 0; return; }
+        cvApply(); raf = requestAnimationFrame(frame);
+      };
+      raf = requestAnimationFrame(frame);
+    }
+    document.addEventListener('pointerdown', (e) => { const st = e.target.closest && e.target.closest('.cv-stage'); if (!st) return; stopSpin(); hist = [{ t: performance.now(), y: cv.ry }]; dr = { x: e.clientX, y: e.clientY, rx: cv.rx, ry: cv.ry }; try { st.setPointerCapture(e.pointerId); } catch (er) { /* ignore */ } const d = $('.cv-3d', st); if (d) d.style.transition = 'none'; });
     document.addEventListener('pointermove', (e) => {
       if (!dr) return; cv.ry = dr.ry + (e.clientX - dr.x) * 0.6; cv.rx = Math.max(-40, Math.min(40, dr.rx - (e.clientY - dr.y) * 0.4)); cvApply();
+      const nw = performance.now(); hist.push({ t: nw, y: cv.ry }); while (hist.length > 2 && nw - hist[0].t > 100) hist.shift();
       const card = $('.cv-front .card'), st = $('.cv-stage'); if (card && st) { const b = st.getBoundingClientRect(), x = (e.clientX - b.left) / b.width, y = (e.clientY - b.top) / b.height; card.style.setProperty('--mx', (x * 100).toFixed(1) + '%'); card.style.setProperty('--my', (y * 100).toFixed(1) + '%'); }
     });
-    const up = () => { if (!dr) return; dr = null; const d = $('.cv-3d'); if (d) { d.style.transition = 'transform .6s cubic-bezier(.2,.8,.2,1)'; cv.rx = 0; cvApply(); } };
+    const up = () => { if (!dr) return; dr = null; const d = $('.cv-3d');
+      // speed over the last ~100ms of the drag (deg per ms); a pause before letting go means no coasting
+      const nw = performance.now(), a = hist[0], b = hist[hist.length - 1]; let v = a && b && b.t > a.t && nw - b.t < 80 ? (b.y - a.y) / (b.t - a.t) : 0; hist = []; v = Math.max(-3, Math.min(3, v));
+      if (d && !reduceMotion() && Math.abs(v) > 0.05) { d.style.transition = 'none'; coast(v); return; }
+      if (d) { d.style.transition = 'transform .6s cubic-bezier(.2,.8,.2,1)'; cv.rx = 0; cvApply(); } };
     document.addEventListener('pointerup', up); document.addEventListener('pointercancel', up);
     document.addEventListener('click', (e) => {
       const t = e.target.closest && e.target.closest('[data-cv]'); if (!t) return; const a = t.dataset.cv, d = $('.cv-3d');
       if (a === 'v0' || a === 'v1') { cv.v = a === 'v1' ? 1 : 0; cvDraw(); return; }
-      if (d) d.style.transition = 'transform .7s cubic-bezier(.3,.9,.3,1)';
+      stopSpin(); if (d) d.style.transition = 'transform .7s cubic-bezier(.3,.9,.3,1)';
       if (a === 'flip') { cv.ry += 180; cv.rx = 0; } else if (a === 'reset') { cv.ry = Math.round(cv.ry / 360) * 360; cv.rx = 0; if (!cv.ry) cv.ry = 0; }
       SFX.click(); cvApply();
     });
@@ -763,11 +791,17 @@
   const TC = G.TIER_COLOR, RAINBOW = ['#ff4d6d', '#ffb02e', '#4cc38a', '#4aa3ff', '#b36bff', '#ffffff'];
 
   const MONSTER = '<div class="monster-card"><svg viewBox="0 0 100 140" aria-hidden="true"><path d="M24 44 L16 16 L40 36Z M76 44 L84 16 L60 36Z" fill="#4ade80"/><ellipse cx="50" cy="80" rx="42" ry="48" fill="#4a24a0"/><circle cx="34" cy="64" r="11" fill="#fff"/><circle cx="66" cy="64" r="11" fill="#fff"/><circle cx="37" cy="66" r="5" fill="#111"/><circle cx="63" cy="66" r="5" fill="#111"/><path d="M20 94 Q50 132 80 94 Q50 106 20 94Z" fill="#12061f"/><path d="M27 96 L33 108 L39 98 L45 110 L51 98 L57 110 L63 98 L69 108 L75 96 Z" fill="#fff"/></svg><span>CHOMP</span></div>';
+  let preparing = false;
   async function openPacks(n) {
+    if (opening || preparing) return;
+    const want = n;
+    // Another device may have opened packs since this one last synced: catch up first, so the same pack cannot be opened twice.
+    if (net && auth && auth.loggedIn() && net.enabled()) { preparing = true; let ok = false; try { ok = await Promise.race([net.syncNow(), new Promise((r) => setTimeout(() => r(false), 10000))]); } catch (e) { ok = false; } preparing = false;
+      if (!ok) { toast('Could not reach your account to check for other devices. Try again in a moment.', true); return; } }
     tick(); n = Math.min(n, avail());
-    if (opening || n < 1) return;
+    if (opening || n < 1) { if (want >= 1 && n < 1) { toast('No packs left. Your account was updated from another device.', true); renderHeader(); route(true); } return; }
     opening = true; unlockAudio(); applyAudio(); updateHud();
-    const results = []; for (let i = 0; i < n; i++) { if (S.packs > 0) S.packs--; else S.bonus--; results.push(rollPack()); }
+    const results = []; for (let i = 0; i < n; i++) { if (S.packs > 0) { S.packs--; S.sp = (S.sp || 0) + 1; } else S.bonus--; results.push(rollPack()); } // sp = regular packs spent since the last upload (merged by difference)
     if (S.packs < D().cap) S.last = Math.max(S.last, Date.now() - (Date.now() - S.last)); save();
     const eatenAll = results.flat().filter((o) => o.eaten); let all = results.flat().filter((o) => !o.eaten); const single = n === 1;
     const ov = document.createElement('div'); ov.className = 'opening'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', 'Opening ' + (single ? 'a pack' : n + ' packs'));
@@ -809,7 +843,7 @@
       const up = () => { if (!drag || done) return; drag = null; lastTick = 0; stage.classList.remove('ripping'); set(0); };
       stage.addEventListener('pointerup', up); stage.addEventListener('pointercancel', up);
     });
-    const finish = () => { fx.stop(); ov.remove(); opening = false; document.documentElement.classList.remove('pack-open'); document.documentElement.classList.toggle('modal-open', !!$('.modal-bg')); renderHeader(); route(); };
+    const finish = () => { fx.stop(); ov.remove(); opening = false; if (stalePending) { stalePending = false; try { const j = JSON.parse(localStorage.getItem(KEY)); if (j && (+j.mod || 0) > (S.mod || 0)) S = normalize(j); } catch (er) { /* ignore */ } } document.documentElement.classList.remove('pack-open'); document.documentElement.classList.toggle('modal-open', !!$('.modal-bg')); renderHeader(); route(); };
     try {
       await ripped; $('.tap-hint', ov)?.remove();
       const fast = () => skipped || reduceMotion();
@@ -1007,33 +1041,51 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden) updateHud(); });
   setInterval(updateHud, 1000);
   applyAudio();
-  const ctx = { G, S: () => S, isAdminPid, isAdminAcct, ADMIN_TAG, save, toast, modal, closeModal, popOpen, popSet, popClose, popup, esc, $, $$, cardHTML, tilt, avatarHTML, bannerCSS, profileHTML, route, renderHeader, fmt, uid, normalize, hasCopy, takeCopy, addCopy, since, tcls, rarityCmp, busy: () => opening, refreshFeeds: () => refreshFeeds(), notify: function () { return social ? social.notify.apply(null, arguments) : null; },
+  const ctx = { G, S: () => S, isAdminPid, isAdminAcct, ADMIN_TAG, save, toast, modal, closeModal, popOpen, popSet, popClose, popup, esc, $, $$, cardHTML, tilt, avatarHTML, bannerCSS, profileHTML, route, renderHeader, fmt, uid, normalize, hasCopy, takeCopy, addCopy, copiesText, since, tcls, rarityCmp, busy: () => opening, refreshFeeds: () => refreshFeeds(), notify: function () { return social ? social.notify.apply(null, arguments) : null; },
     setHTML: (el, html) => { if (!el || el.innerHTML === html) return; const y = window.scrollY; el.innerHTML = html; el.classList.add('soft'); window.scrollTo({ top: y, left: 0, behavior: 'instant' }); },
     restore: (j) => { S = normalize(Object.assign({}, j, { account: S.account || null })); save(); location.reload(); },
     loggedIn: () => !!(auth && auth.loggedIn()), allowed: () => accessState() === 'ok', checkReset: () => checkReset(), onSync: () => { if (auth) auth.watch(); if (social) social.scan(); if (auth && auth.loggedIn()) { const a = accessState(); if (a !== lastAccess) route(); } },
-    fresh, adopt: (j) => { S = normalize(j); save(true); }, rerenderSettings: () => pageSettings(),
+    fresh, adopt: (j, fromCloud) => { S = normalize(j); if (fromCloud) { S.base = window.SSGMerge.makeBase(S, (id) => /^[\w-]{1,60}$/.test(id)); S.sp = 0; } save(true); }, rerenderSettings: () => pageSettings(),
     // Bring the account's newer cloud save in. keepLocal = this device has changes the cloud has not seen, so combine instead of replace (never loses a card).
     mergeCloud: (p, keepLocal) => {
-      const cc = {}; Object.keys(p.cards).forEach((id) => { const c = p.cards[id]; cc[id] = { n: c.n, h: c.h, f: c.f, t: c.t, l: c.l, p: c.p }; });
+      const M = window.SSGMerge, known = (id) => /^[\w-]{1,60}$/.test(id);
+      const cc = {}; Object.keys(Object.assign({}, p.unk || {}, p.cards)).forEach((id) => { const c = p.cards[id] || p.unk[id]; cc[id] = { n: c.n, h: c.h, f: c.f, t: c.t, l: c.l, p: c.p }; });
       const raw = p.raw || {}, prof = { id: p.id, name: p.name, bio: p.bio || '', hue: p.hue, pfp: p.pfp, banner: p.banner, joined: p.joined };
+      const cOpened = +(raw.stats && raw.stats.opened) || p.opened || 0, cPulls = +(raw.stats && raw.stats.pulls) || p.pulls || 0, cBonus = Math.max(0, Math.floor(+raw.bonus) || 0);
       let next;
       if (!keepLocal) { next = Object.assign(fresh(), raw, { cards: cc, profile: prof, settings: Object.assign({}, S.settings), account: S.account }); next.mod = next.syncMod = p.mod; }
       else {
         next = JSON.parse(JSON.stringify(S));
-        Object.keys(cc).forEach((id) => { const a = next.cards[id], b = cc[id];
-          if (!a) next.cards[id] = b; else { a.n = Math.max(a.n, b.n); a.h = Math.min(a.n, Math.max(a.h || 0, b.h || 0)); a.f = a.f || b.f ? 1 : 0; a.t = Math.min(a.t || b.t, b.t || a.t); a.l = Math.max(a.l || 0, b.l || 0); a.p = Math.max(a.p || 0, b.p || 0); } });
+        const base = S.base && S.base.c ? S.base : null; // what the cloud held when this device last synced
+        // Cards: the cloud's cards plus whatever this device added or spent since then (never "the larger of the two").
+        next.cards = M.cards(next.cards, cc, base);
         const cloudNewer = p.mod > (S.mod || 0);
         next.codes = Array.from(new Set((next.codes || []).concat(raw.codes || []))); next.wish = Object.assign({}, raw.wish || {}, next.wish || {}); next.granted = Object.assign({}, S.granted || {});
         // Take over the cloud's applied-gift list, except for removals this device has not applied yet (it must still apply them, or old cards would come back).
         const pend = {}; net.state.grants.forEach((g) => { if (g.wipe || g.take.length || g.opened != null) pend[g.gid] = 1; });
         Object.keys(raw.granted || {}).forEach((k) => { if (!pend[k] || (S.granted || {})[k]) next.granted[k] = raw.granted[k]; });
-        next.stats = { opened: Math.max(S.stats.opened, +(raw.stats && raw.stats.opened) || 0), pulls: Math.max(S.stats.pulls, +(raw.stats && raw.stats.pulls) || 0) };
-        if (cloudNewer) { ['packs', 'last', 'sinceRare', 'started'].forEach((k) => { if (raw[k] != null) next[k] = raw[k]; }); if (raw.net) next.net = Object.assign({}, raw.net, { done: Object.assign({}, S.net.done, raw.net.done || {}) }); next.profile = Object.assign({}, S.profile, prof); }
+        if (base) {
+          next.stats = { opened: Math.max(0, cOpened + (S.stats.opened - base.o)), pulls: Math.max(0, cPulls + (S.stats.pulls - base.p)) };
+          // Packs: the cloud's count and timer, minus the packs opened here that it has not seen. Opening more than it has left comes out of the bonus packs.
+          let pk = raw.packs != null ? Math.floor(+raw.packs) - (S.sp || 0) : S.packs, owe = 0; if (pk < 0) { owe = -pk; pk = 0; }
+          next.packs = Math.max(0, pk); if (raw.last != null) next.last = +raw.last || next.last;
+          next.bonus = Math.max(0, cBonus + ((S.bonus || 0) - base.b) - owe);
+          ['sinceRare', 'started'].forEach((k) => { if (cloudNewer && raw[k] != null) next[k] = raw[k]; });
+          if (raw.net) next.net = M.net(S.net, raw.net, base);
+        } else {
+          next.stats = { opened: Math.max(S.stats.opened, cOpened), pulls: Math.max(S.stats.pulls, cPulls) };
+          if (cloudNewer) { ['packs', 'last', 'sinceRare', 'started'].forEach((k) => { if (raw[k] != null) next[k] = raw[k]; }); }
+          if (raw.net) next.net = M.net(S.net, raw.net, null);
+        }
+        if (cloudNewer) next.profile = Object.assign({}, S.profile, prof);
         next.syncMod = p.mod; next.mod = Math.max(Date.now(), p.mod + 1);
         const cs = raw.social || {}, ls = S.social || {}, byId = {}; (cs.notes || []).concat(ls.notes || []).forEach((x) => { if (!x || !x.id) return; const o = byId[x.id]; byId[x.id] = o ? Object.assign({}, o, x, { read: Math.max(o.read || 0, x.read || 0) }) : x; });
         next.social = { notes: Object.values(byId).sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 60), nseen: Object.assign({}, cs.nseen || {}, ls.nseen || {}), seen: Object.assign({}, cs.seen || {}, ls.seen || {}), badges: ls.badges || cs.badges || null };
       }
       next.resetAt = Math.max(S.resetAt || 0, p.ra || 0); // never go back to a state from before an admin reset
+      // The cloud copy this merge started from is the new base: everything on top of it still has to be uploaded.
+      next.base = M.makeBase({ cards: cc, bonus: cBonus, stats: { opened: cOpened, pulls: cPulls }, net: raw.net }, known);
+      if (!keepLocal) next.sp = 0;
       S = normalize(next); save(true); renderHeader(); if (!opening) route(true);
     } };
   net = window.SSGNet(ctx);
@@ -1048,10 +1100,11 @@
     if (S.account && S.account !== se.k) { try { localStorage.removeItem('ss-gacha-session'); } catch (e) { /* ignore */ } return; }
     if (S.account !== se.k || S.profile.id !== se.pid) { S.account = se.k; S.profile.id = se.pid; save(true); }
   })();
+  if (!S.base && S.account && S.syncMod && (S.mod || 0) <= S.syncMod) { S.base = window.SSGMerge.makeBase(S, (id) => /^[\w-]{1,60}$/.test(id)); S.sp = 0; save(true); } // saves from before v54 that are fully synced get their merge base now
   net.loadCache(); // show admin-made card changes straight away; the online sync refreshes them
   // ---------- auto update ----------
   // version.json holds the newest version number. A tab running an older one reloads itself (after uploading its save), so old tabs do not overwrite newer data.
-  const VERSION = 53;
+  const VERSION = 55;
   async function checkVersion() {
     try {
       const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;

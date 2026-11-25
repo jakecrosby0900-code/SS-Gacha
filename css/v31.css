@@ -79,3 +79,7 @@
 .pile.tight .ppk { transform-origin: 50% 100%; transform: translate(calc(var(--d) * var(--st, 5px) * -1), calc(var(--d) * var(--st, 5px) * -.7)) rotate(calc(var(--d) * -.6deg)); }
 .pile.tight { --span: 0deg; }
 
+
+/* v54: wider copies chip ("×1 skibidi ×7 normal") and the skibidi tag in Community rare pulls */
+.card .copies { white-space: nowrap; max-width: calc(100% - 1em); overflow: hidden; text-overflow: ellipsis; font-size: .68em; }
+.pull-sk { font-weight: 700; background: linear-gradient(90deg, #ff4d6d, #ffb02e, #4cc38a, #4aa3ff, #b36bff); -webkit-background-clip: text; background-clip: text; color: transparent; }
