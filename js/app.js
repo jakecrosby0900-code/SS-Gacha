@@ -483,7 +483,7 @@
   // Legendary-or-better cards other players picked up most recently (read from their published collections).
   function pullsFeedHTML() {
     const l = net.recentPulls(12);
-    return l.length ? l.map((x) => `<a class="feed-row pull" style="--tc:var(--${tcls(x.card.tier)})" href="#user-${esc(x.id)}"><span class="tag">${esc(x.card.tier.toUpperCase())}</span><span class="grow"><b>${esc(x.name)}</b> pulled #${x.card.rank} ${esc(x.card.name)}${x.holo ? ' <b class="pull-sk">skibidi</b>' : ''}</span><small class="muted">${since(x.at)}</small></a>`).join('')
+    return l.length ? l.map((x) => `<a class="feed-row pull" style="--tc:var(--${tcls(x.card.tier)})" href="#user-${esc(x.id)}"><span class="tag">${esc(x.card.tier.toUpperCase())}</span><span class="grow"><b>${esc(x.name)}</b> pulled #${x.card.rank} ${x.holo ? '<b class="pull-sk">SKIBIDI</b> ' : ''}${esc(x.card.name)}</span><small class="muted">${since(x.at)}</small></a>`).join('')
       : `<p class="muted small">${net.enabled() ? 'Nothing yet. Legendary and better pulls from every player show up here.' : 'Rare pulls from other players show up here once the site is online.'}</p>`;
   }
   function refreshFeeds() { const a = $('#feedTrades'), b = $('#feedPulls'); if (a) a.innerHTML = tradesFeedHTML(); if (b) b.innerHTML = pullsFeedHTML(); }
@@ -1045,10 +1045,10 @@
     setHTML: (el, html) => { if (!el || el.innerHTML === html) return; const y = window.scrollY; el.innerHTML = html; el.classList.add('soft'); window.scrollTo({ top: y, left: 0, behavior: 'instant' }); },
     restore: (j) => { S = normalize(Object.assign({}, j, { account: S.account || null })); save(); location.reload(); },
     loggedIn: () => !!(auth && auth.loggedIn()), allowed: () => accessState() === 'ok', checkReset: () => checkReset(), onSync: () => { if (auth) auth.watch(); if (social) social.scan(); if (auth && auth.loggedIn()) { const a = accessState(); if (a !== lastAccess) route(); } },
-    fresh, adopt: (j, fromCloud) => { S = normalize(j); if (fromCloud) { S.base = window.SSGMerge.makeBase(S, (id) => /^[\w-]{1,60}$/.test(id)); S.sp = 0; } save(true); }, rerenderSettings: () => pageSettings(),
+    fresh, adopt: (j, fromCloud) => { S = normalize(j); if (fromCloud) { S.base = window.SSGMerge.makeBase(S, (id) => /^[^\x00-\x1f]{1,100}$/.test(id)); S.sp = 0; } save(true); }, rerenderSettings: () => pageSettings(),
     // Bring the account's newer cloud save in. keepLocal = this device has changes the cloud has not seen, so combine instead of replace (never loses a card).
     mergeCloud: (p, keepLocal) => {
-      const M = window.SSGMerge, known = (id) => /^[\w-]{1,60}$/.test(id);
+      const M = window.SSGMerge, known = (id) => /^[^\x00-\x1f]{1,100}$/.test(id);
       const cc = {}; Object.keys(Object.assign({}, p.unk || {}, p.cards)).forEach((id) => { const c = p.cards[id] || p.unk[id]; cc[id] = { n: c.n, h: c.h, f: c.f, t: c.t, l: c.l, p: c.p }; });
       const raw = p.raw || {}, prof = { id: p.id, name: p.name, bio: p.bio || '', hue: p.hue, pfp: p.pfp, banner: p.banner, joined: p.joined };
       const cOpened = +(raw.stats && raw.stats.opened) || p.opened || 0, cPulls = +(raw.stats && raw.stats.pulls) || p.pulls || 0, cBonus = Math.max(0, Math.floor(+raw.bonus) || 0);
@@ -1100,11 +1100,11 @@
     if (S.account && S.account !== se.k) { try { localStorage.removeItem('ss-gacha-session'); } catch (e) { /* ignore */ } return; }
     if (S.account !== se.k || S.profile.id !== se.pid) { S.account = se.k; S.profile.id = se.pid; save(true); }
   })();
-  if (!S.base && S.account && S.syncMod && (S.mod || 0) <= S.syncMod) { S.base = window.SSGMerge.makeBase(S, (id) => /^[\w-]{1,60}$/.test(id)); S.sp = 0; save(true); } // saves from before v54 that are fully synced get their merge base now
+  if (!S.base && S.account && S.syncMod && (S.mod || 0) <= S.syncMod) { S.base = window.SSGMerge.makeBase(S, (id) => /^[^\x00-\x1f]{1,100}$/.test(id)); S.sp = 0; save(true); } // saves from before v54 that are fully synced get their merge base now
   net.loadCache(); // show admin-made card changes straight away; the online sync refreshes them
   // ---------- auto update ----------
   // version.json holds the newest version number. A tab running an older one reloads itself (after uploading its save), so old tabs do not overwrite newer data.
-  const VERSION = 55;
+  const VERSION = 56;
   async function checkVersion() {
     try {
       const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' }); if (!r.ok) return;

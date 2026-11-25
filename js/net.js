@@ -63,7 +63,7 @@
     function cleanPlayer(b, num) {
       const id = idOk(b.id); if (!id) return null;
       const cards = {}, unk = {}; // unk = cards this site does not know right now (an admin removed them): kept so they come back if the card is restored
-      if (b.cards && typeof b.cards === 'object') Object.keys(b.cards).forEach((cid) => { const a = b.cards[cid]; if (!BYID[cid] && /^[\w-]{1,60}$/.test(cid) && Array.isArray(a) && +a[0] > 0 && Object.keys(unk).length < 400) { const n = Math.min(9999, +a[0] | 0); unk[cid] = { n: n, h: Math.min(n, Math.max(0, +a[1] | 0)), f: a[2] ? 1 : 0, t: +a[3] || 0, l: +a[4] || 0, p: +a[5] || 0 }; } if (BYID[cid] && Array.isArray(a) && +a[0] > 0) { const n = Math.min(9999, +a[0] | 0); cards[cid] = { n: n, h: Math.min(n, Math.max(0, +a[1] | 0)), f: a[2] ? 1 : 0, t: +a[3] || 0, l: +a[4] || 0, p: +a[5] || 0 }; } });
+      if (b.cards && typeof b.cards === 'object') Object.keys(b.cards).forEach((cid) => { const a = b.cards[cid]; if (!BYID[cid] && /^[^\x00-\x1f]{1,100}$/.test(cid) && Array.isArray(a) && +a[0] > 0 && Object.keys(unk).length < 400) { const n = Math.min(9999, +a[0] | 0); unk[cid] = { n: n, h: Math.min(n, Math.max(0, +a[1] | 0)), f: a[2] ? 1 : 0, t: +a[3] || 0, l: +a[4] || 0, p: +a[5] || 0 }; } if (BYID[cid] && Array.isArray(a) && +a[0] > 0) { const n = Math.min(9999, +a[0] | 0); cards[cid] = { n: n, h: Math.min(n, Math.max(0, +a[1] | 0)), f: a[2] ? 1 : 0, t: +a[3] || 0, l: +a[4] || 0, p: +a[5] || 0 }; } });
       const wish = Array.isArray(b.wish) ? b.wish.filter((x) => typeof x === 'string' && BYID[x]).slice(0, 300) : [];
       const wk = b.wk && +b.wk.t === weekStart(Date.now()) && +b.wk.v === 2 ? Math.max(0, +b.wk.s || 0) : null; // v2 = baseline taken with the 10-point scoring
       const pl = derive({ id: id, name: nm(b.name), hue: Number.isFinite(+b.hue) ? ((+b.hue % 360) + 360) % 360 : 28, pfp: okImg(b.pfp), banner: okImg(b.banner), joined: +b.joined || 0, seen: +b.seen || 0,
@@ -213,7 +213,7 @@
     // ---------- publishing my account ----------
     function build() {
       const s = S(), p = s.profile, cards = {};
-      Object.keys(s.cards).forEach((id) => { const e = s.cards[id]; if (/^[\w-]{1,60}$/.test(id) && e.n > 0) cards[id] = [e.n, e.h || 0, e.f ? 1 : 0, e.t || 0, e.l || 0, e.p || 0]; });
+      Object.keys(s.cards).forEach((id) => { const e = s.cards[id]; if (/^[^\x00-\x1f]{1,100}$/.test(id) && e.n > 0) cards[id] = [e.n, e.h || 0, e.f ? 1 : 0, e.t || 0, e.l || 0, e.p || 0]; });
       const ws = weekStart(Date.now()); if (!s.wk || s.wk.t < ws || s.wk.v !== 2) s.wk = { t: ws, s: G.scoreOf(s.cards), v: 2 };
       return { t: 'player', v: 1, ra: s.resetAt || 0, id: p.id, name: p.name, bio: p.bio || '', hue: p.hue, pfp: p.pfp, banner: p.banner, joined: p.joined, seen: Date.now(), opened: s.stats.opened, pulls: s.stats.pulls, cards: cards, wish: Object.keys(s.wish || {}).filter((x) => BYID[x]).slice(0, 300), wk: s.wk, show: s.showcase || [],
         save: { wish: s.wish || {}, wk: s.wk, showcase: s.showcase || [], mod: s.mod || 0, granted: s.granted, packs: s.packs, bonus: s.bonus || 0, last: s.last, sinceRare: s.sinceRare, started: s.started, stats: s.stats, codes: s.codes, net: s.net, social: s.social } };
@@ -221,7 +221,7 @@
     // Uploads this device's save to the account's player issue. s.syncMod remembers which version the cloud holds, so a stale device can tell it must merge first.
     async function publish(force, keep, again) {
       const s = S(), c = conf(), snap = build(), key = JSON.stringify(Object.assign({}, snap, { seen: 0 })), M = window.SSGMerge;
-      const nextBase = M.makeBase({ cards: s.cards, bonus: s.bonus, stats: s.stats, net: s.net }, (id) => /^[\w-]{1,60}$/.test(id)), spSent = s.sp || 0; // what the cloud will hold after this upload
+      const nextBase = M.makeBase({ cards: s.cards, bonus: s.bonus, stats: s.stats, net: s.net }, (id) => /^[^\x00-\x1f]{1,100}$/.test(id)), spSent = s.sp || 0; // what the cloud will hold after this upload
       if (net.cfg.blocked.some((x) => x.id === s.profile.id)) return; // removed from the leaderboard by the admin
       const mine = net.dir.find(isMe) || (net.myNum && Date.now() - net.createdAt < 120000 ? { num: net.myNum } : null); // the new-issue shortcut only covers GitHub's short listing delay
       if (!force && key === net.lastKey && Date.now() - net.lastBeat < BEAT_MS && (mine || Date.now() - net.createdAt < 120000)) return;

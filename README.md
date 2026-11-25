@@ -176,3 +176,7 @@ Open tabs check `version.json` every couple of minutes and reload themselves whe
 - Opening a pack now needs a successful sync with the account (so two offline devices cannot both open the same pack). If the server cannot be reached it says so and you try again.
 - Tabs of the same browser share one save: a tab that sees another tab's save takes it over instead of overwriting it later.
 - Cards the site does not recognise (an admin deleted them) are kept in the player's cloud save instead of being dropped, so they return when the admin restores the card.
+
+## v56 notes
+- Fixed a v55 bug: card ids look like `SS:Freddy`, and the id check added in v55 rejected every one of them, so saves uploaded with no cards (the leaderboard showed 0 points). The check now accepts any normal id. A device that still holds the cards re-uploads them on its next sync.
+- Community rare pulls: SKIBIDI (capitals) now sits in front of the card name.
